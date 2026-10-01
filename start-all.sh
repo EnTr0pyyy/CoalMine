@@ -23,6 +23,20 @@ cleanup() {
 }
 trap cleanup SIGINT SIGTERM
 
+# 0. Ensure environment files exist from .env.example
+if [ ! -f "$ROOT_DIR/Backend/.env" ] && [ -f "$ROOT_DIR/Backend/.env.example" ]; then
+    cp "$ROOT_DIR/Backend/.env.example" "$ROOT_DIR/Backend/.env"
+    echo "📄 Auto-created Backend/.env from .env.example"
+fi
+if [ ! -f "$ROOT_DIR/Frontend/.env" ] && [ -f "$ROOT_DIR/Frontend/.env.example" ]; then
+    cp "$ROOT_DIR/Frontend/.env.example" "$ROOT_DIR/Frontend/.env"
+    echo "📄 Auto-created Frontend/.env from .env.example"
+fi
+if [ ! -f "$ROOT_DIR/.env" ] && [ -f "$ROOT_DIR/.env.example" ]; then
+    cp "$ROOT_DIR/.env.example" "$ROOT_DIR/.env"
+    echo "📄 Auto-created .env from .env.example"
+fi
+
 # 1. Check Ollama (Optional Local LLM)
 echo "[1/4] Checking Ollama service..."
 if curl -s http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then

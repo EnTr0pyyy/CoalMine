@@ -4,23 +4,15 @@ import { LogIn } from 'lucide-react';
 import Card from '../../components/common/Card.jsx';
 import Button from '../../components/common/Button.jsx';
 import { useAuth } from '../../hooks/useAuth.js';
-import { ROLES } from '../../utils/roles.js';
 import { DEPARTMENTS, DEPARTMENT_ORDER, DEPARTMENT_LABELS } from '../../utils/departments.js';
 
-const LOGIN_TABS = [
-  { key: 'department', label: 'Department' },
-  { key: 'contractor', label: 'Contractor' },
-  { key: 'regulator', label: 'Regulator' },
-];
-
 const inputClass =
-  'w-full rounded border border-border-strong px-3 py-2 text-sm text-ink-900 placeholder:text-ink-500/60 focus:border-brand-600';
+  'w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-slate-900 focus:ring-1 focus:ring-slate-900 outline-none transition-all';
 
 export default function Login() {
   const { login, isAuthenticating, authError } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const [loginType, setLoginType] = useState('department');
   const [department, setDepartment] = useState(DEPARTMENTS.SYSTEM);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -28,14 +20,13 @@ export default function Login() {
   async function handleSubmit(e) {
     e.preventDefault();
     try {
-      const user = await login({
+      await login({
         username,
         password,
-        loginType,
-        department: loginType === 'department' ? department : undefined,
+        loginType: 'department',
+        department,
       });
-      const defaultPath = user.role === ROLES.CONTRACTOR ? '/contractor/dashboard' : '/dashboard';
-      const redirectTo = location.state?.from?.pathname || defaultPath;
+      const redirectTo = location.state?.from?.pathname || '/dashboard';
       navigate(redirectTo, { replace: true });
     } catch {
       // authError is already surfaced from context
@@ -43,49 +34,31 @@ export default function Login() {
   }
 
   return (
-    <Card>
-      <div className="mb-4 flex rounded border border-border-strong p-0.5 text-sm">
-        {LOGIN_TABS.map((tab) => (
-          <button
-            key={tab.key}
-            type="button"
-            onClick={() => setLoginType(tab.key)}
-            className={`flex-1 rounded px-2 py-1.5 font-medium transition-colors ${
-              loginType === tab.key ? 'bg-brand-800 text-white' : 'text-ink-700 hover:bg-surface-sunken'
-            }`}
+    <div className="rounded-2xl border border-slate-200/90 bg-white p-7 sm:p-8 shadow-xl shadow-slate-200/40">
+      <form onSubmit={handleSubmit} className="space-y-5">
+        <div>
+          <label htmlFor="department" className="mb-1.5 block text-xs font-semibold text-slate-700">
+            Department / Authority
+          </label>
+          <select
+            id="department"
+            value={department}
+            onChange={(e) => setDepartment(e.target.value)}
+            className="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3.5 py-2.5 text-sm text-slate-900 focus:bg-white focus:border-slate-900 focus:ring-1 focus:ring-slate-900 outline-none transition-all"
           >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      <form onSubmit={handleSubmit} className="space-y-4">
-        {loginType === 'department' && (
-          <div>
-            <label htmlFor="department" className="mb-1 block text-sm font-medium text-ink-700">
-              Select Department
-            </label>
-            <select
-              id="department"
-              value={department}
-              onChange={(e) => setDepartment(e.target.value)}
-              className="w-full rounded border border-border-strong bg-white px-3 py-2 text-sm text-ink-900 focus:border-brand-600"
-            >
-              {DEPARTMENT_ORDER.map((d) => (
-                <option key={d} value={d}>
-                  {DEPARTMENT_LABELS[d]}
-                </option>
-              ))}
-            </select>
-            <p className="mt-1 text-xs text-ink-500">
-              One shared login for every department — System Department carries organization-wide, admin-level
-              access.
-            </p>
-          </div>
-        )}
+            {DEPARTMENT_ORDER.map((d) => (
+              <option key={d} value={d}>
+                {DEPARTMENT_LABELS[d]}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1.5 text-xs text-slate-400">
+            System Department provides CIL Corporate & Ministry intelligence access.
+          </p>
+        </div>
 
         <div>
-          <label htmlFor="username" className="mb-1 block text-sm font-medium text-ink-700">
+          <label htmlFor="username" className="mb-1.5 block text-xs font-semibold text-slate-700">
             Username
           </label>
           <input
@@ -100,7 +73,7 @@ export default function Login() {
         </div>
 
         <div>
-          <label htmlFor="password" className="mb-1 block text-sm font-medium text-ink-700">
+          <label htmlFor="password" className="mb-1.5 block text-xs font-semibold text-slate-700">
             Password
           </label>
           <input
@@ -114,16 +87,21 @@ export default function Login() {
           />
         </div>
 
-        {authError && <p className="text-sm text-status-danger">{authError}</p>}
+        {authError && <p className="text-xs font-semibold text-rose-600">{authError}</p>}
 
-        <Button type="submit" icon={LogIn} className="w-full" disabled={isAuthenticating}>
+        <button
+          type="submit"
+          className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-slate-800 transition-all disabled:opacity-50"
+          disabled={isAuthenticating}
+        >
+          <LogIn size={16} />
           {isAuthenticating ? 'Signing in…' : 'Sign in'}
-        </Button>
+        </button>
 
-        <p className="text-center text-xs text-ink-500">
-          Mock authentication for prototype purposes — any username/password is accepted.
+        <p className="text-center text-xs text-slate-400 pt-1">
+          Authorized access for CMPDI, CIL subsidiaries, and Ministry of Coal.
         </p>
       </form>
-    </Card>
+    </div>
   );
 }

@@ -40,14 +40,14 @@ export default function NoticeBoard() {
   });
 
   return (
-    <>
+    <div className="space-y-6 max-w-7xl mx-auto pb-8">
       <PageHeader
-        title="Notice Board"
-        description="One organization-wide board, visible to every department — not a separate board per department."
+        title="Official Directives & Notices"
+        description="Notifications, DGMS safety directives, and CMPDI technical circulars issued across CIL subsidiaries."
       />
 
       <FilterBar
-        search={{ value: search, onChange: setSearch, placeholder: 'Search notices…' }}
+        search={{ value: search, onChange: setSearch, placeholder: 'Search by reference number, subject, or directive text…' }}
         selects={[{ key: 'category', label: 'All Categories', value: category, onChange: setCategory, options: NOTICE_CATEGORIES.map((c) => ({ value: c, label: c })) }]}
       />
 
@@ -55,12 +55,12 @@ export default function NoticeBoard() {
       {state.status === 'error' && <ErrorState message={state.error} onRetry={load} />}
       {state.status === 'success' && filtered.length === 0 && <EmptyState title="No notices found" />}
       {state.status === 'success' && filtered.length > 0 && (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
           {filtered.map((n) => (
             <NoticeCard key={n.id} notice={n} />
           ))}
         </div>
       )}
-    </>
+    </div>
   );
 }

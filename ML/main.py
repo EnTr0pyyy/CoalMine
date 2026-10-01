@@ -27,6 +27,17 @@ from config import (
     OLLAMA_EMBED_MODEL,
     PORT,
 )
+from nlp.wordcloud_engine import WordCloudEngine
+from generator.report_engine import ReportEngine
+from parliamentary.parliamentary_engine import ParliamentaryEngine
+from tabular_processor import MultimodalTabularProcessor
+from data_validator import DataValidator
+
+wordcloud_engine = WordCloudEngine()
+report_engine = ReportEngine(ollama_url=OLLAMA_BASE_URL, chat_model=OLLAMA_CHAT_MODEL)
+parliamentary_engine = ParliamentaryEngine(ollama_url=OLLAMA_BASE_URL, chat_model=OLLAMA_CHAT_MODEL)
+tabular_processor = MultimodalTabularProcessor()
+data_validator = DataValidator()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ml_service")
@@ -628,6 +639,190 @@ async def extract_pdf_fields(
         raise
     except Exception as e:
         logger.error(f"Error in extract_pdf_fields: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+# =========================================================================
+# CMPDI / CIL & Ministry of Coal Endpoints
+# =========================================================================
+
+class ReportGenerateRequest(BaseModel):
+    template_type: str = "MONTHLY_PRODUCTION_OFFTAKE"
+    subsidiary: str = "SECL"
+    period: str = "FY 2023-24 (Q4)"
+    data_payload: Optional[Dict[str, Any]] = None
+
+@app.post("/api/reports/generate")
+async def generate_automated_report(req: ReportGenerateRequest):
+    """
+    Module 1: Automated Report Generation Platform.
+    Calculates preparation time reduction percentage and extraction accuracy.
+    """
+    try:
+        payload = req.data_payload or {}
+        report = await report_engine.generate_report(
+            template_type=req.template_type,
+            subsidiary=req.subsidiary,
+            period=req.period,
+            data_payload=payload
+        )
+        return report
+    except Exception as e:
+        logger.error(f"Report generation error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/reports/templates")
+async def get_report_templates():
+    return {
+        "templates": [
+            {
+                "id": "MONTHLY_PRODUCTION_OFFTAKE",
+                "title": "Monthly Production & Offtake Review",
+                "description": "Standardized compilation of opencast/underground coal production, OBR, and thermal rakes dispatch.",
+                "estimatedManualHours": 6.0,
+                "targetAutomation": "95%"
+            },
+            {
+                "id": "GEOLOGICAL_RESERVE_ASSESSMENT",
+                "title": "Geological Reserve & Seam Quality Assessment",
+                "description": "CMPDI exploration compilation, borehole log aggregation, GCV grade classification, and proved reserves.",
+                "estimatedManualHours": 8.0,
+                "targetAutomation": "92%"
+            },
+            {
+                "id": "MINISTRY_PARLIAMENTARY_SUMMARY",
+                "title": "Ministry of Coal Performance & Parliamentary Synthesis",
+                "description": "Cross-subsidiary analytical brief for parliamentary standing committee and administrative reviews.",
+                "estimatedManualHours": 7.0,
+                "targetAutomation": "90%"
+            },
+            {
+                "id": "SUBSIDIARY_BENCHMARKING",
+                "title": "Inter-Subsidiary Performance & Efficiency Matrix",
+                "description": "Benchmarking stripping ratios, heavy machinery availability, and washery yields across all CIL subsidiaries.",
+                "estimatedManualHours": 5.0,
+                "targetAutomation": "96%"
+            }
+        ]
+    }
+
+class WordCloudRequest(BaseModel):
+    texts: Optional[List[str]] = None
+    documents: Optional[List[Dict[str, Any]]] = None
+    max_words: int = 50
+    subsidiary: Optional[str] = None
+
+@app.post("/api/analytics/wordcloud")
+async def generate_wordcloud(req: WordCloudRequest):
+    """
+    Module 2: Automated Dynamic Word Cloud Generation.
+    Filters domain stopwords and calculates real document term frequencies.
+    """
+    try:
+        sample_texts = req.texts or []
+        if req.documents and len(req.documents) > 0 and len(sample_texts) == 0:
+            sample_texts = [d.get("text", "") for d in req.documents if d.get("text")]
+
+        if not sample_texts:
+            sample_texts = [
+                "Overburden removal in opencast mines achieved 42.5 M.Cu.m sustaining high bench preparation.",
+                "Borehole drilling by CMPDI confirmed 142 MT of proved geological reserves in Raniganj coalfield.",
+                "First Mile Connectivity rail corridor and rapid loading system minimized rake siding delays in Talcher.",
+                "BCCL enhanced coking coal production to reduce high-grade steel import dependency.",
+                "Safety guidelines and statutory compliance audits executed under DGMS supervision across SECL and MCL blocks.",
+                "Environmental reclamation, afforestation, and coal bed methane degasification advanced steadily."
+            ]
+
+        cloud_data = wordcloud_engine.extract_word_cloud(sample_texts, max_words=req.max_words, documents=req.documents)
+        return {"success": True, "wordCloud": cloud_data, "totalWords": len(cloud_data)}
+    except Exception as e:
+        logger.error(f"Word cloud extraction error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+class TopicRequest(BaseModel):
+    documents: Optional[List[Dict[str, Any]]] = None
+
+@app.post("/api/analytics/topics")
+async def extract_topic_clusters(req: TopicRequest):
+    """
+    Module 2: Topic Identification and Semantic Clustering.
+    """
+    try:
+        docs = req.documents or [
+            {"title": "SECL Mega Opencast Expansion", "content": "Overburden removal and 42 Cu.m shovels deployment for stripping ratio optimization."},
+            {"title": "BCCL Jharia Coking Coal Modernization", "content": "Washing beneficiation and coking coal production for domestic steel plants."},
+            {"title": "CMPDI Exploration Bulletin 2024", "content": "Exploratory drilling, borehole core sampling, and seam thickness modeling."},
+            {"title": "MCL First Mile Connectivity Project", "content": "Rail siding infrastructure, rapid loading silos, and mechanization of coal transport."},
+            {"title": "DGMS Safety and Environmental Audit", "content": "Mine safety norms, slope stability sensors, and statutory compliance enforcement."}
+        ]
+        topics = wordcloud_engine.extract_topics(docs)
+        return {"success": True, "topics": topics}
+    except Exception as e:
+        logger.error(f"Topic identification error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+class ParliamentaryQueryRequest(BaseModel):
+    house: str = "Lok Sabha"
+    questionNo: str = "Starred Q.No. 302"
+    questionType: str = "Starred"
+    subject: str = "Coal Production Targets and Offtake by CIL Subsidiaries"
+    questionText: str
+
+@app.post("/api/parliamentary/query")
+async def handle_parliamentary_query(req: ParliamentaryQueryRequest):
+    """
+    Module 3: AI-Based Query and Response System for Parliamentary Questions.
+    """
+    try:
+        res = await parliamentary_engine.draft_response({
+            "house": req.house,
+            "questionNo": req.questionNo,
+            "questionType": req.questionType,
+            "subject": req.subject,
+            "questionText": req.questionText
+        })
+        return res
+    except Exception as e:
+        logger.error(f"Parliamentary query response error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+class ConsistencyValidationRequest(BaseModel):
+    subsidiary: str = "SECL"
+    metrics: Dict[str, Any]
+
+@app.post("/api/documents/validate-consistency")
+async def validate_data_consistency(req: ConsistencyValidationRequest):
+    """
+    Validates data integrity, mathematical consistency, and historical consistency.
+    """
+    try:
+        report = data_validator.validate_dataset(req.subsidiary, req.metrics)
+        return report
+    except Exception as e:
+        logger.error(f"Consistency validation error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/documents/process-multimodal")
+async def process_multimodal_document(file: UploadFile = File(...)):
+    """
+    Processes Scanned PDFs, Excel spreadsheets (.xlsx), and CSV files.
+    Extracts structured geological & mining figures with validation.
+    """
+    try:
+        content = await file.read()
+        filename = file.filename or "uploaded_data.csv"
+        extracted = tabular_processor.process_file(content, filename)
+        
+        # Run automated consistency validation if figures found
+        if extracted.get("success") and extracted.get("extractedFigures"):
+            val_res = data_validator.validate_dataset(
+                extracted["extractedFigures"].get("subsidiary", "SECL"),
+                extracted["extractedFigures"]
+            )
+            extracted["validationScorecard"] = val_res
+
+        return extracted
+    except Exception as e:
+        logger.error(f"Multimodal processing error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":

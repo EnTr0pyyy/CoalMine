@@ -1,6 +1,7 @@
 const { ensurePostgresRunning } = require('./dbLauncher');
 const { execSync } = require('child_process');
 const path = require('path');
+const fs = require('fs');
 
 const BACKEND_DIR = path.resolve(__dirname, '../..');
 
@@ -10,6 +11,14 @@ async function main() {
   console.log('====================================================\n');
 
   try {
+    // 0. Ensure .env exists from .env.example
+    const envPath = path.join(BACKEND_DIR, '.env');
+    const envExamplePath = path.join(BACKEND_DIR, '.env.example');
+    if (!fs.existsSync(envPath) && fs.existsSync(envExamplePath)) {
+      fs.copyFileSync(envExamplePath, envPath);
+      console.log('📄 Automatically created Backend/.env from .env.example');
+    }
+
     // 1. Ensure PostgreSQL is up and coalgov_db exists
     await ensurePostgresRunning();
 

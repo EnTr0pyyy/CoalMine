@@ -24,6 +24,9 @@ const reportsRoutes = require('./routes/reports.routes');
 const syncRoutes = require('./routes/sync.routes');
 const uploadRoutes = require('./routes/upload.routes');
 const chatRoutes = require('./routes/chat.routes');
+const parliamentaryRoutes = require('./routes/parliamentary.routes');
+const analyticsRoutes = require('./routes/analytics.routes');
+const subsidiaryRoutes = require('./routes/subsidiary.routes');
 
 const app = express();
 
@@ -93,6 +96,9 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/reports', reportsRoutes);
 app.use('/api/sync', syncRoutes);
 app.use('/api/uploads', uploadRoutes);
+app.use('/api/parliamentary', parliamentaryRoutes);
+app.use('/api/analytics', analyticsRoutes);
+app.use('/api/subsidiaries', subsidiaryRoutes);
 app.use('/api', chatRoutes);
 
 // ==========================================

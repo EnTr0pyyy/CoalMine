@@ -23,98 +23,77 @@ import {
   TrendingUp,
   Radio,
   Megaphone,
+  FileBarChart,
+  Cloud,
+  MessageSquare
 } from 'lucide-react';
 import { ROLES } from './roles.js';
 
 // `roles: null` means "visible to every authenticated role".
-// Each item's `roles` list is a UI-only filter — see roles.js.
 export const NAV_SECTIONS = [
   {
-    items: [{ label: 'Dashboard', path: '/dashboard', icon: LayoutDashboard, roles: null }],
-  },
-  {
-    title: 'Governance',
+    title: 'Statutory Core & Gazette',
     items: [
-      { label: 'Flags', path: '/flags', icon: Flag, roles: null },
-      { label: 'Responses', path: '/responses', icon: MessageSquareReply, roles: null },
-      {
-        label: 'Audit Trail',
-        path: '/audit-logs',
-        icon: History,
-        roles: [ROLES.CORPORATE_ADMIN, ROLES.MINE_MANAGER, ROLES.REGULATOR],
-      },
+      { label: 'Executive Dashboard', path: '/dashboard', icon: LayoutDashboard, roles: null },
+      { label: 'Official Gazette & Notices', path: '/notices', icon: Megaphone, roles: null },
+      { label: 'Automated Reports', path: '/reports', icon: FileBarChart, roles: null },
+      { label: 'Word Cloud & Topics', path: '/topics', icon: Cloud, roles: null },
+      { label: 'Parliamentary Q&A', path: '/parliamentary', icon: MessageSquare, roles: null },
+      { label: 'AI Mining Copilot', path: '/copilot', icon: Bot, roles: null },
     ],
   },
   {
-    title: 'Mines',
+    title: 'Geological & CIL Subsidiaries',
     items: [
       {
-        label: 'All Mines',
+        label: 'CIL Subsidiaries & Mines',
         path: '/mines',
         icon: Mountain,
-        roles: [ROLES.CORPORATE_ADMIN, ROLES.MINE_MANAGER, ROLES.SAFETY_OFFICER, ROLES.REGULATOR],
+        roles: null,
       },
       {
-        label: 'Risk Map',
+        label: 'Geological Risk Map',
         path: '/risk/map',
         icon: Map,
-        roles: [ROLES.CORPORATE_ADMIN, ROLES.MINE_MANAGER, ROLES.SAFETY_OFFICER, ROLES.REGULATOR],
+        roles: null,
       },
+      { label: 'Document Repository', path: '/documents', icon: FileText, roles: null },
     ],
   },
   {
+    title: 'Statutory Compliance & DGMS',
     items: [
-      { label: 'Compliance', path: '/compliance', icon: ShieldCheck, roles: null },
+      { label: 'Statutory Compliance', path: '/compliance', icon: ShieldCheck, roles: null },
       {
-        label: 'Inspections',
+        label: 'DGMS Inspections',
         path: '/inspections',
         icon: ClipboardCheck,
-        roles: [ROLES.CORPORATE_ADMIN, ROLES.MINE_MANAGER, ROLES.SAFETY_OFFICER, ROLES.FIELD_INSPECTOR, ROLES.REGULATOR],
+        roles: null,
       },
-      {
-        label: 'Field Reporting',
-        path: '/field',
-        icon: Radio,
-        roles: [ROLES.CORPORATE_ADMIN, ROLES.MINE_MANAGER, ROLES.SAFETY_OFFICER, ROLES.FIELD_INSPECTOR],
-      },
+      { label: 'Flags & Violations', path: '/flags', icon: Flag, roles: null },
       { label: 'Corrective Actions', path: '/corrective-actions', icon: Wrench, roles: null },
       {
-        label: 'Contractors',
-        path: '/contractors',
-        icon: Users,
-        roles: [ROLES.CORPORATE_ADMIN, ROLES.MINE_MANAGER, ROLES.SAFETY_OFFICER, ROLES.REGULATOR],
+        label: 'Audit Trail & Provenance',
+        path: '/audit-logs',
+        icon: History,
+        roles: null,
       },
-      {
-        label: 'Risk Intelligence',
-        path: '/risk',
-        icon: Gauge,
-        roles: [ROLES.CORPORATE_ADMIN, ROLES.MINE_MANAGER, ROLES.SAFETY_OFFICER, ROLES.REGULATOR],
-      },
-      { label: 'Documents', path: '/documents', icon: FileText, roles: null },
-      {
-        label: 'Reports',
-        path: '/reports',
-        icon: BarChart3,
-        roles: [ROLES.CORPORATE_ADMIN, ROLES.MINE_MANAGER, ROLES.SAFETY_OFFICER, ROLES.REGULATOR],
-      },
-      { label: 'AI Copilot', path: '/copilot', icon: Bot, roles: null },
     ],
   },
   {
+    title: 'System & Preferences',
     items: [
-      { label: 'Notice Board', path: '/notices', icon: Megaphone, roles: null },
       { label: 'Notifications', path: '/notifications', icon: Bell, roles: null },
       { label: 'Settings', path: '/settings', icon: Settings, roles: null },
     ],
   },
 ];
 
-// A Contractor logs into a self-service portal, not the governance
-// shell above — an entirely separate nav, per the project brief.
 export const CONTRACTOR_NAV_SECTIONS = [
   {
     items: [
       { label: 'My Dashboard', path: '/contractor/dashboard', icon: LayoutDashboard },
+      { label: 'Official Notices', path: '/notices', icon: Megaphone },
       { label: 'My Projects', path: '/contractor/projects', icon: FolderKanban },
       { label: 'My Reports', path: '/contractor/reports', icon: ClipboardList },
       { label: 'Attendance', path: '/contractor/attendance', icon: CalendarCheck },
@@ -128,7 +107,6 @@ export const CONTRACTOR_NAV_SECTIONS = [
   {
     items: [
       { label: 'AI Copilot', path: '/copilot', icon: Bot },
-      { label: 'Notice Board', path: '/notices', icon: Megaphone },
       { label: 'Notifications', path: '/notifications', icon: Bell },
       { label: 'Settings', path: '/settings', icon: Settings },
     ],

@@ -36,6 +36,8 @@ import Performance from './pages/contractor/Performance.jsx';
 import DocumentIntelligence from './pages/documents/DocumentIntelligence.jsx';
 import AICopilot from './pages/copilot/AICopilot.jsx';
 import Reports from './pages/reports/Reports.jsx';
+import WordCloudTopics from './pages/topics/WordCloudTopics.jsx';
+import ParliamentaryInquiries from './pages/parliamentary/ParliamentaryInquiries.jsx';
 import FieldReporting from './pages/field/FieldReporting.jsx';
 import Settings from './pages/settings/Settings.jsx';
 import NoticeBoard from './pages/notices/NoticeBoard.jsx';
@@ -93,6 +95,8 @@ export default function App() {
         <Route path="/documents" element={<DocumentIntelligence />} />
         <Route path="/copilot" element={<AICopilot />} />
         <Route path="/reports" element={<Reports />} />
+        <Route path="/topics" element={<WordCloudTopics />} />
+        <Route path="/parliamentary" element={<ParliamentaryInquiries />} />
         <Route path="/field" element={<FieldReporting />} />
         <Route path="/notices" element={<NoticeBoard />} />
         <Route path="/settings" element={<Settings />} />

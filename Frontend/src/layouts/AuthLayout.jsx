@@ -1,18 +1,30 @@
-import { ShieldCheck } from 'lucide-react';
+import { Landmark, ShieldCheck } from 'lucide-react';
 import { Outlet } from 'react-router-dom';
 
 export default function AuthLayout() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-surface-canvas px-4">
-      <div className="w-full max-w-sm">
+    <div className="flex min-h-screen items-center justify-center bg-surface-canvas px-4 py-12">
+      <div className="w-full max-w-md">
         <div className="mb-8 flex flex-col items-center text-center">
-          <span className="mb-3 flex h-11 w-11 items-center justify-center rounded-md bg-brand-800 text-white">
-            <ShieldCheck size={22} />
-          </span>
-          <p className="text-lg font-semibold text-ink-900">MineGov AI</p>
-          <p className="text-sm text-ink-500">Smart Governance & Compliance Monitoring</p>
+          <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-900 text-white font-bold text-base shadow-sm">
+            CS
+          </div>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold tracking-tight text-ink-900">
+              CoalSetu
+            </h1>
+            <span className="rounded-full bg-brand-100 px-2 py-0.5 text-xs font-semibold text-brand-800">
+              AI
+            </span>
+          </div>
+          <p className="mt-1.5 text-xs text-ink-500 max-w-xs leading-relaxed">
+            CMPDI · CIL Subsidiaries · Ministry of Coal
+          </p>
         </div>
         <Outlet />
+        <div className="mt-8 text-center text-xs text-ink-500">
+          Statutory Document Processing & Parliamentary Intelligence
+        </div>
       </div>
     </div>
   );

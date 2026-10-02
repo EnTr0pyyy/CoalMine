@@ -45,6 +45,16 @@ else
     echo "    ℹ️ Ollama is not running. (Optional for local LLM copilot)"
 fi
 
+# Free any stale processes on ports 5000, 8001, 5173
+echo "🧹 Ensuring ports 5000, 8001, 5173 are clear..."
+for p in 5000 8001 5173; do
+  pids=$(lsof -ti :$p 2>/dev/null || true)
+  if [ -n "$pids" ]; then
+    kill -9 $pids 2>/dev/null || true
+  fi
+done
+sleep 1
+
 # 2. Start ML FastAPI Service (Port 8001) if Python venv exists
 if [ -d "$ROOT_DIR/ML/venv" ]; then
     echo "[2/4] Starting ML FastAPI Service on port 8001..."

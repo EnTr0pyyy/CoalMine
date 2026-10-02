@@ -1,6 +1,6 @@
 import re
 import math
-from collections import Counter
+from collections import Counter, defaultdict
 from typing import List, Dict, Any, Optional
 
 # Custom domain-specific stopwords for coal mining and legislative/administrative context

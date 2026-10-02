@@ -41,6 +41,7 @@ import ParliamentaryInquiries from './pages/parliamentary/ParliamentaryInquiries
 import FieldReporting from './pages/field/FieldReporting.jsx';
 import Settings from './pages/settings/Settings.jsx';
 import NoticeBoard from './pages/notices/NoticeBoard.jsx';
+import PlatformOverview from './pages/platform/PlatformOverview.jsx';
 import NotFound from './pages/NotFound.jsx';
 
 export default function App() {
@@ -100,6 +101,7 @@ export default function App() {
         <Route path="/field" element={<FieldReporting />} />
         <Route path="/notices" element={<NoticeBoard />} />
         <Route path="/settings" element={<Settings />} />
+        <Route path="/platform" element={<PlatformOverview />} />
       </Route>
 
       <Route path="/" element={<Navigate to="/dashboard" replace />} />

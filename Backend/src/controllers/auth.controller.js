@@ -33,6 +33,8 @@ const departmentLabels = {
 const login = async (req, res) => {
   try {
     const { username, password, loginType = 'department', department } = req.body;
+    const lookupUsername = String(username || '').trim();
+    const lookupPassword = String(password || '').trim();
 
     let user = null;
 
@@ -70,35 +72,29 @@ const login = async (req, res) => {
         });
       }
     } else {
-      // Department login
       const targetDept = department || 'system';
-      if (username) {
-        user = await prisma.user.findFirst({
-          where: {
+      const lookupWhere = lookupUsername
+        ? {
             OR: [
-              { username: username },
-              { email: username },
+              { username: lookupUsername },
+              { email: lookupUsername },
               { department: targetDept },
             ],
-          },
-        });
-      } else {
-        user = await prisma.user.findFirst({
-          where: { department: targetDept },
-        });
-      }
+          }
+        : { department: targetDept };
+
+      user = await prisma.user.findFirst({ where: lookupWhere });
 
       if (!user) {
-        // Provision user for this department
         const derivedRole = roleForDepartment(targetDept);
         const deptLabel = departmentLabels[targetDept] || targetDept;
         user = await prisma.user.create({
           data: {
             id: `dept-${targetDept}`,
             email: `${targetDept}@coalgov.in`,
-            username: username || targetDept,
-            password: await hashPassword(password || 'password123'),
-            name: username ? `${username} (${deptLabel})` : `${deptLabel} Officer`,
+            username: lookupUsername || targetDept,
+            password: await hashPassword(lookupPassword || 'password123'),
+            name: lookupUsername ? `${lookupUsername} (${deptLabel})` : `${deptLabel} Officer`,
             role: derivedRole,
             department: targetDept,
             designation: `${deptLabel} Officer`,
@@ -113,11 +109,25 @@ const login = async (req, res) => {
       });
     }
 
-    // Optional password verification if password provided and matches hash
-    if (password && user.password && !user.password.startsWith('$2')) {
-      // password not hashed, hash it
-      user.password = await hashPassword(user.password);
-      await prisma.user.update({ where: { id: user.id }, data: { password: user.password } });
+    if (lookupPassword) {
+      const storedPassword = user.password || '';
+      const validPassword = storedPassword.startsWith('$2')
+        ? await comparePassword(lookupPassword, storedPassword)
+        : storedPassword === lookupPassword;
+
+      if (!validPassword) {
+        return res.status(401).json({
+          message: 'Invalid username or password.',
+        });
+      }
+
+      if (!storedPassword.startsWith('$2')) {
+        const newPasswordHash = await hashPassword(lookupPassword);
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { password: newPasswordHash },
+        });
+      }
     }
 
     const tokenPayload = {

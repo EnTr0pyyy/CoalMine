@@ -12,7 +12,9 @@ import {
   FileText,
   ShieldCheck,
   Check,
-  AlertCircle
+  AlertCircle,
+  Download,
+  FileDown,
 } from 'lucide-react';
 import PageHeader from '../../components/common/PageHeader.jsx';
 import Card from '../../components/common/Card.jsx';
@@ -36,6 +38,8 @@ export default function Reports() {
   const [report, setReport] = useState(null);
   const [platformStats, setPlatformStats] = useState(null);
   const [uploadError, setUploadError] = useState(null);
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const [exportingDocx, setExportingDocx] = useState(false);
 
   const fileInputRef = useRef(null);
 
@@ -105,6 +109,32 @@ export default function Reports() {
 
   function handlePrint() {
     window.print();
+  }
+
+  async function handleDownloadPdf() {
+    if (!report) return;
+    setExportingPdf(true);
+    try {
+      await reportsService.exportReportPdf(report);
+    } catch (err) {
+      console.error('PDF export failed:', err);
+      alert('PDF export failed. Please ensure the ML service is running.');
+    } finally {
+      setExportingPdf(false);
+    }
+  }
+
+  async function handleDownloadDocx() {
+    if (!report) return;
+    setExportingDocx(true);
+    try {
+      await reportsService.exportReportDocx(report);
+    } catch (err) {
+      console.error('DOCX export failed:', err);
+      alert('DOCX export failed. Please ensure the ML service is running.');
+    } finally {
+      setExportingDocx(false);
+    }
   }
 
   const currentTemplateObj = templates.find((t) => t.id === selectedTemplate);
@@ -405,12 +435,35 @@ export default function Reports() {
                 Generated at {report.generatedAt} · Prepared in {report.generationTimeSeconds}s
               </p>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Download PDF */}
+              <button
+                onClick={handleDownloadPdf}
+                disabled={exportingPdf}
+                className="flex items-center gap-1.5 rounded border border-brand-600 bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 transition disabled:opacity-60"
+              >
+                {exportingPdf
+                  ? <Loader2 size={13} className="animate-spin" />
+                  : <Download size={13} />}
+                {exportingPdf ? 'Generating PDF…' : 'Download PDF'}
+              </button>
+              {/* Download DOCX */}
+              <button
+                onClick={handleDownloadDocx}
+                disabled={exportingDocx}
+                className="flex items-center gap-1.5 rounded border border-emerald-600 bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 transition disabled:opacity-60"
+              >
+                {exportingDocx
+                  ? <Loader2 size={13} className="animate-spin" />
+                  : <FileDown size={13} />}
+                {exportingDocx ? 'Generating DOCX…' : 'Download DOCX'}
+              </button>
+              {/* Browser Print */}
               <button
                 onClick={handlePrint}
-                className="flex items-center gap-2 rounded border border-border px-3 py-1.5 text-xs font-medium text-ink-700 hover:bg-slate-50 transition"
+                className="flex items-center gap-1.5 rounded border border-border px-3 py-1.5 text-xs font-medium text-ink-700 hover:bg-slate-50 transition"
               >
-                <Printer size={15} /> Print / Export PDF
+                <Printer size={13} /> Print
               </button>
             </div>
           </div>

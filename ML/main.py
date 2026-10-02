@@ -17,7 +17,14 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 import pypdf
 import io
-from pdf_processor import extract_fields_from_document, get_donut_pipeline
+from pdf_processor import (
+    extract_fields_from_document,
+    get_donut_pipeline,
+    ocr_extract_text_from_page,
+    ocr_extract_full_document,
+    hybrid_extract,
+    TESSERACT_AVAILABLE,
+)
 
 from config import (
     DATABASE_URL,
@@ -227,6 +234,7 @@ async def health():
         "chat_model": OLLAMA_CHAT_MODEL,
         "embed_model": OLLAMA_EMBED_MODEL,
         "models_available": models_available,
+        "tesseract_ocr": "available" if TESSERACT_AVAILABLE else "not installed",
     }
 
 @app.post("/chat/stream")
@@ -670,6 +678,37 @@ async def generate_automated_report(req: ReportGenerateRequest):
         logger.error(f"Report generation error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
+class ReportExportRequest(BaseModel):
+    report_data: Dict[str, Any]
+
+@app.post("/api/reports/export/pdf")
+async def export_report_pdf(req: ReportExportRequest):
+    """Generates a Ministry-grade formatted PDF report."""
+    try:
+        pdf_buffer = report_engine.export_pdf(req.report_data)
+        return StreamingResponse(
+            pdf_buffer,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename=Report_{req.report_data.get('subsidiary', 'CIL')}.pdf"}
+        )
+    except Exception as e:
+        logger.error(f"PDF Export error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/reports/export/docx")
+async def export_report_docx(req: ReportExportRequest):
+    """Generates an editable Ministry-grade formatted DOCX report."""
+    try:
+        docx_buffer = report_engine.export_docx(req.report_data)
+        return StreamingResponse(
+            docx_buffer,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition": f"attachment; filename=Report_{req.report_data.get('subsidiary', 'CIL')}.docx"}
+        )
+    except Exception as e:
+        logger.error(f"DOCX Export error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/reports/templates")
 async def get_report_templates():
     return {
@@ -824,6 +863,124 @@ async def process_multimodal_document(file: UploadFile = File(...)):
     except Exception as e:
         logger.error(f"Multimodal processing error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+# =========================================================================
+# Tesseract OCR Endpoints
+# =========================================================================
+
+@app.post("/ocr/extract")
+async def ocr_extract_page(
+    file: UploadFile = File(...),
+    page: int = Form(0),
+    lang: str = Form("auto"),
+    dpi: int = Form(300),
+):
+    """
+    Extract full text from a single page of a PDF or image using Tesseract OCR.
+    Supports auto language detection.
+    """
+    if not TESSERACT_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="Tesseract OCR is not installed. Install pytesseract and Tesseract binary."
+        )
+    try:
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+        result = ocr_extract_text_from_page(
+            file_bytes=content,
+            filename=file.filename or "document.pdf",
+            page_num=page,
+            lang=lang,
+            dpi=dpi,
+        )
+        return {"success": True, **result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"OCR extract error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/ocr/extract-full")
+async def ocr_extract_all_pages(
+    file: UploadFile = File(...),
+    lang: str = Form("auto"),
+    dpi: int = Form(300),
+    max_pages: int = Form(50),
+):
+    """
+    Extract full text from ALL pages of a PDF using Tesseract OCR.
+    Returns combined text and per-page breakdown.
+    """
+    if not TESSERACT_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="Tesseract OCR is not installed. Install pytesseract and Tesseract binary."
+        )
+    try:
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+        result = ocr_extract_full_document(
+            file_bytes=content,
+            filename=file.filename or "document.pdf",
+            lang=lang,
+            dpi=dpi,
+            max_pages=max_pages,
+        )
+        return {"success": True, **result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"OCR full extract error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/ocr/hybrid")
+async def ocr_hybrid_extract(
+    file: UploadFile = File(...),
+    fields: str = Form(""),
+    page: int = Form(0),
+    lang: str = Form("auto"),
+):
+    """
+    Hybrid extraction combining Donut DocVQA (structured fields) + Tesseract OCR (full text).
+    Provides maximum extraction coverage for scanned mining documents.
+    """
+    try:
+        content = await file.read()
+        if not content:
+            raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+        field_list = []
+        if fields.strip():
+            fields_str = fields.strip()
+            if fields_str.startswith("["):
+                try:
+                    field_list = json.loads(fields_str)
+                except Exception:
+                    field_list = [f.strip() for f in fields_str.strip("[]").split(",") if f.strip()]
+            else:
+                field_list = [f.strip() for f in fields_str.split(",") if f.strip()]
+
+        result = hybrid_extract(
+            file_bytes=content,
+            filename=file.filename or "document.pdf",
+            fields=field_list if field_list else None,
+            page_num=page,
+            lang=lang,
+        )
+        return {"success": True, **result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Hybrid extract error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 if __name__ == "__main__":
     import uvicorn

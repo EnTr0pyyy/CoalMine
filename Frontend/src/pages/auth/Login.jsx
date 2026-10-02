@@ -14,8 +14,8 @@ export default function Login() {
   const navigate = useNavigate();
   const location = useLocation();
   const [department, setDepartment] = useState(DEPARTMENTS.SYSTEM);
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
+  const [username, setUsername] = useState('system');
+  const [password, setPassword] = useState('password123');
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -53,7 +53,7 @@ export default function Login() {
             ))}
           </select>
           <p className="mt-1.5 text-xs text-slate-400">
-            System Department provides CIL Corporate & Ministry intelligence access.
+            Demo access: system / password123
           </p>
         </div>
 

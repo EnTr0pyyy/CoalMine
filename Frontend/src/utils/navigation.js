@@ -84,6 +84,7 @@ export const NAV_SECTIONS = [
     title: 'System & Preferences',
     items: [
       { label: 'Notifications', path: '/notifications', icon: Bell, roles: null },
+      { label: 'Platform Capabilities', path: '/platform', icon: Gauge, roles: null },
       { label: 'Settings', path: '/settings', icon: Settings, roles: null },
     ],
   },

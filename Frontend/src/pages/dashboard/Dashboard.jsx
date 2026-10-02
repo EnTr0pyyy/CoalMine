@@ -27,6 +27,7 @@ import { parliamentaryService } from '../../services/parliamentaryService.js';
 import { analyticsService } from '../../services/analyticsService.js';
 import { noticeService } from '../../services/noticeService.js';
 import { formatDate } from '../../utils/format.js';
+import ProductionEChart from '../../components/dashboard/ProductionEChart.jsx';
 
 export default function Dashboard() {
   const [subsidiaries, setSubsidiaries] = useState([]);
@@ -158,6 +159,9 @@ export default function Dashboard() {
           ))}
         </div>
       </div>
+
+      {/* Apache ECharts Subsidiary Matrix Widget */}
+      <ProductionEChart />
 
       {/* Spacious 3x2 Platform Metrics Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">

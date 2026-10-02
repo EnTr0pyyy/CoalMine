@@ -27,6 +27,8 @@ const chatRoutes = require('./routes/chat.routes');
 const parliamentaryRoutes = require('./routes/parliamentary.routes');
 const analyticsRoutes = require('./routes/analytics.routes');
 const subsidiaryRoutes = require('./routes/subsidiary.routes');
+const searchRoutes = require('./routes/search.routes');
+const { ensureFTSIndexes } = require('./services/searchService');
 
 const app = express();
 
@@ -110,6 +112,7 @@ app.use('/api/uploads', uploadRoutes);
 app.use('/api/parliamentary', parliamentaryRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/subsidiaries', subsidiaryRoutes);
+app.use('/api/search', searchRoutes);
 app.use('/api', chatRoutes);
 
 // ==========================================
@@ -143,6 +146,7 @@ async function start() {
   try {
     // Ensure PostgreSQL is running
     await ensurePostgresRunning();
+    ensureFTSIndexes().catch(err => console.warn('[FTS] Index setup notice:', err.message));
 
     server = app.listen(PORT, '0.0.0.0', () => {
       console.log(`🚀 CoalGov Backend running on 0.0.0.0:${PORT} [${env.NODE_ENV}]`);

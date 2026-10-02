@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Menu, Bell, ChevronDown, LogOut, Settings, Megaphone, Landmark } from 'lucide-react';
+import { Menu, Bell, ChevronDown, LogOut, Settings, Megaphone, Landmark, Search } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth.js';
 import { roleLabel } from '../../utils/roles.js';
 import { departmentLabel } from '../../utils/departments.js';
 import { notificationService } from '../../services/notificationService.js';
 import { noticeService } from '../../services/noticeService.js';
+import GlobalSearchModal from './GlobalSearchModal.jsx';
 
 function initials(name = '') {
   return name
@@ -22,6 +23,18 @@ export default function Topbar({ onMenuClick }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [topNotice, setTopNotice] = useState(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        setSearchOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   useEffect(() => {
     notificationService.getUnreadCount().then(setUnreadCount);
@@ -76,6 +89,18 @@ export default function Topbar({ onMenuClick }) {
       </div>
 
       <div className="flex items-center gap-3">
+        {/* Global FTS Search Trigger Bar */}
+        <button
+          onClick={() => setSearchOpen(true)}
+          className="flex items-center gap-2 rounded-xl border border-border bg-surface-sunken/80 px-3 py-1.5 text-xs text-ink-500 hover:border-brand-300 hover:bg-white hover:text-ink-900 transition shadow-xs"
+        >
+          <Search size={14} className="text-brand-600" />
+          <span className="hidden sm:inline-block font-medium">Search records…</span>
+          <kbd className="hidden md:inline-flex items-center gap-0.5 rounded border border-border bg-white px-1.5 py-0.5 text-[10px] font-mono text-ink-400">
+            Ctrl K
+          </kbd>
+        </button>
+
         <Link
           to="/notifications"
           className="relative rounded-lg p-2 text-ink-700 hover:bg-surface-sunken transition"
@@ -134,6 +159,8 @@ export default function Topbar({ onMenuClick }) {
           )}
         </div>
       </div>
+
+      <GlobalSearchModal isOpen={searchOpen} onClose={() => setSearchOpen(false)} />
     </header>
   );
 }

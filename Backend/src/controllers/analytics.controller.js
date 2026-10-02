@@ -175,7 +175,7 @@ const getWordCloud = async (req, res) => {
     try {
       [dbDocs, dbNotices, dbFlags] = await Promise.all([
         prisma.document.findMany({
-          select: { id: true, name: true, fileType: true, mineName: true, extractedData: true }
+          select: { id: true, name: true, fileType: true, mineName: true, fileUrl: true, extractedData: true }
         }),
         prisma.notice.findMany({
           select: { id: true, title: true, description: true, category: true }
@@ -202,10 +202,17 @@ const getWordCloud = async (req, res) => {
           docText += `${ed.observations.join(' ')} `;
         }
         if (ed.summary) docText += `${ed.summary} `;
+        if (Array.isArray(ed.headers)) {
+          docText += `${ed.headers.join(' ')} `;
+        }
+        if (Array.isArray(ed.dataRows)) {
+          docText += `${ed.dataRows.flat().join(' ')} `;
+        }
       }
       docCorpus.push({
         id: d.id,
         name: d.name || `Document ${d.id}`,
+        fileUrl: d.fileUrl || null,
         text: docText
       });
     });
@@ -256,6 +263,19 @@ const getWordCloud = async (req, res) => {
     const termBigrams = new Map();
     const docSourcesMap = new Map();
 
+    function extractSnippet(text, term) {
+      if (!text || !term) return null;
+      const cleanLower = text.toLowerCase();
+      const idx = cleanLower.indexOf(term.toLowerCase());
+      if (idx === -1) return text.slice(0, 100) + '...';
+      const start = Math.max(0, idx - 40);
+      const end = Math.min(text.length, idx + term.length + 60);
+      let s = text.slice(start, end).trim();
+      if (start > 0) s = '...' + s;
+      if (end < text.length) s = s + '...';
+      return s;
+    }
+
     finalCorpus.forEach((doc) => {
       const clean = (doc.text || '')
         .toLowerCase()
@@ -273,7 +293,14 @@ const getWordCloud = async (req, res) => {
         termCounts.set(tok, (termCounts.get(tok) || 0) + 1);
         if (!docSourcesMap.has(tok)) docSourcesMap.set(tok, new Map());
         const docMap = docSourcesMap.get(tok);
-        docMap.set(doc.id, { id: doc.id, name: doc.name, count: (docMap.get(doc.id)?.count || 0) + 1 });
+        const prev = docMap.get(doc.id);
+        docMap.set(doc.id, {
+          id: doc.id,
+          name: doc.name,
+          fileUrl: doc.fileUrl || null,
+          count: (prev?.count || 0) + 1,
+          snippet: prev?.snippet || extractSnippet(doc.text, tok)
+        });
       });
 
       // Bigram counts
@@ -282,7 +309,14 @@ const getWordCloud = async (req, res) => {
         termBigrams.set(bg, (termBigrams.get(bg) || 0) + 1);
         if (!docSourcesMap.has(bg)) docSourcesMap.set(bg, new Map());
         const bgMap = docSourcesMap.get(bg);
-        bgMap.set(doc.id, { id: doc.id, name: doc.name, count: (bgMap.get(doc.id)?.count || 0) + 1 });
+        const prev = bgMap.get(doc.id);
+        bgMap.set(doc.id, {
+          id: doc.id,
+          name: doc.name,
+          fileUrl: doc.fileUrl || null,
+          count: (prev?.count || 0) + 1,
+          snippet: prev?.snippet || extractSnippet(doc.text, bg)
+        });
       }
     });
 

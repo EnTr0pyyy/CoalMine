@@ -20,13 +20,19 @@ import {
   ArrowRight,
   Bell,
   AlertTriangle,
-  Database
+  Database,
+  UploadCloud,
+  ExternalLink,
+  Loader2,
+  Check,
+  FileSpreadsheet
 } from 'lucide-react';
 import PageHeader from '../../components/common/PageHeader.jsx';
 import Card from '../../components/common/Card.jsx';
 import Button from '../../components/common/Button.jsx';
 import { analyticsService } from '../../services/analyticsService.js';
 import { subsidiaryService } from '../../services/subsidiaryService.js';
+import { documentService } from '../../services/documentService.js';
 
 const CATEGORY_COLORS = {
   'Production & Logistics': 'text-emerald-800 bg-emerald-50 border-emerald-300 hover:bg-emerald-100',
@@ -61,7 +67,16 @@ export default function WordCloudTopics() {
   const [activeWord, setActiveWord] = useState(null);
   const [viewMode, setViewMode] = useState('cloud'); // 'cloud' | 'table' | 'topics'
 
+  // Document Upload & Live Ingestion State
+  const [showUploadBox, setShowUploadBox] = useState(false);
+  const [selectedUploadFile, setSelectedUploadFile] = useState(null);
+  const [uploadSubsidiary, setUploadSubsidiary] = useState('SECL');
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadSuccessMsg, setUploadSuccessMsg] = useState(null);
+  const [uploadErrorMsg, setUploadErrorMsg] = useState(null);
+
   const evidenceRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     loadData();
@@ -112,6 +127,71 @@ export default function WordCloudTopics() {
     }
   }
 
+  // Handle clickable document redirect
+  function handleDocumentRedirect(s) {
+    if (!s) return;
+    const docId = s.id || '';
+    const name = s.name || '';
+
+    // Notice redirect
+    if (docId.startsWith('NTC-') || name.startsWith('Notice:')) {
+      const cleanTitle = name.replace(/^Notice:\s*/i, '').trim();
+      navigate(`/notices?search=${encodeURIComponent(cleanTitle)}`);
+      return;
+    }
+
+    // Statutory flag redirect
+    if (docId.startsWith('F-') || name.startsWith('Statutory Flag')) {
+      navigate('/compliance');
+      return;
+    }
+
+    // Default: Document Repository redirect with document ID to auto-expand
+    if (docId) {
+      navigate(`/documents?id=${encodeURIComponent(docId)}`);
+      return;
+    }
+
+    navigate('/documents');
+  }
+
+  // Handle direct file upload and re-indexing into word cloud
+  async function handleUploadAndIndex() {
+    if (!selectedUploadFile) return;
+    setIsUploading(true);
+    setUploadErrorMsg(null);
+    setUploadSuccessMsg(null);
+
+    try {
+      const isSheet = selectedUploadFile.name?.toLowerCase().endsWith('.xlsx') || selectedUploadFile.name?.toLowerCase().endsWith('.csv');
+      const isPdf = selectedUploadFile.name?.toLowerCase().endsWith('.pdf');
+
+      const uploadedDoc = await documentService.uploadDocument(selectedUploadFile, {
+        name: selectedUploadFile.name,
+        fileType: isSheet ? 'Spreadsheet' : isPdf ? 'PDF' : 'Document',
+        mineId: uploadSubsidiary,
+        mineName: `${uploadSubsidiary} Command Operations`,
+      });
+
+      // Reload word cloud & topics immediately
+      await loadData();
+
+      setUploadSuccessMsg(
+        `Document "${selectedUploadFile.name}" successfully ingested! Extracted terminology and tables are now fully indexed in the Word Cloud and Evidence Inspector.`
+      );
+      setSelectedUploadFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+
+      // Set search query to the file base name to highlight its extracted items
+      const baseName = selectedUploadFile.name.replace(/\.[^/.]+$/, '').slice(0, 15);
+      setSearchQuery(baseName);
+    } catch (err) {
+      setUploadErrorMsg(err.message || 'Failed to upload and index document.');
+    } finally {
+      setIsUploading(false);
+    }
+  }
+
   // Helper to render highlighted snippet text
   function renderHighlightedSnippet(text, term) {
     if (!text) return null;
@@ -136,14 +216,22 @@ export default function WordCloudTopics() {
           title="Automated Word Cloud & Topic Identification"
           description="Natural Language Processing (NLP) intelligence extracting statutory terminology, operational themes, and legislative inquiries directly from historical CIL documents and parliamentary gazettes."
         />
-        <div className="flex items-center gap-2 self-start md:self-auto">
+        <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
+          <Button
+            icon={UploadCloud}
+            variant="secondary"
+            onClick={() => setShowUploadBox((v) => !v)}
+            className="border-brand-300 text-brand-700 bg-brand-50 hover:bg-brand-100"
+          >
+            {showUploadBox ? 'Hide Upload Panel' : 'Upload Document to Index'}
+          </Button>
           <Button
             icon={RefreshCw}
             variant="secondary"
             onClick={loadData}
             disabled={loading}
           >
-            {loading ? 'Re-analyzing Corpus…' : 'Refresh NLP Models'}
+            {loading ? 'Re-analyzing…' : 'Refresh NLP Models'}
           </Button>
           <Button
             icon={Bot}
@@ -154,6 +242,101 @@ export default function WordCloudTopics() {
           </Button>
         </div>
       </div>
+
+      {/* Direct Ingestion / Upload Box (Collapsible) */}
+      {showUploadBox && (
+        <Card className="p-6 border-2 border-brand-400 bg-gradient-to-r from-brand-50/70 via-white to-brand-50/50 shadow-md">
+          <div className="space-y-4">
+            <div className="flex items-start justify-between">
+              <div>
+                <h3 className="text-base font-bold text-ink-900 flex items-center gap-2">
+                  <UploadCloud size={20} className="text-brand-600" />
+                  Upload & Index Document into Word Cloud Corpus
+                </h3>
+                <p className="text-xs text-ink-600 mt-0.5">
+                  Upload any geological report, production spreadsheet (.csv/.xlsx), or parliamentary brief. The multimodal pipeline extracts terminology, observations, and data tables to make them instantly searchable.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowUploadBox(false)}
+                className="text-ink-400 hover:text-ink-700 p-1 rounded"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {uploadSuccessMsg && (
+              <div className="p-3.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2">
+                <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
+                <span>{uploadSuccessMsg}</span>
+              </div>
+            )}
+
+            {uploadErrorMsg && (
+              <div className="p-3.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
+                <AlertTriangle size={16} className="text-rose-600 shrink-0" />
+                <span>{uploadErrorMsg}</span>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+              <div className="md:col-span-2 space-y-1.5">
+                <label className="block text-xs font-bold uppercase tracking-wider text-ink-600">
+                  Select Source Document (PDF, XLSX, CSV, TXT, DOCX)
+                </label>
+                <div className="flex items-center gap-3">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".pdf,.xlsx,.xls,.csv,.tsv,.txt,.doc,.docx"
+                    onChange={(e) => {
+                      if (e.target.files?.[0]) setSelectedUploadFile(e.target.files[0]);
+                    }}
+                    className="block w-full text-xs text-ink-600 file:mr-3 file:py-2 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-brand-600 file:text-white hover:file:bg-brand-700 file:cursor-pointer rounded-lg border border-border bg-white px-3 py-1.5 cursor-pointer shadow-xs"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold uppercase tracking-wider text-ink-600">
+                  Target Subsidiary Command
+                </label>
+                <select
+                  value={uploadSubsidiary}
+                  onChange={(e) => setUploadSubsidiary(e.target.value)}
+                  className="w-full rounded-lg border border-border bg-white px-3 py-2 text-xs font-semibold text-ink-900 shadow-xs focus:border-brand-600 focus:outline-none"
+                >
+                  <option value="CIL">CIL Corporate</option>
+                  <option value="MCL">MCL (Mahanadi)</option>
+                  <option value="SECL">SECL (South Eastern)</option>
+                  <option value="BCCL">BCCL (Bharat Coking)</option>
+                  <option value="CCL">CCL (Central)</option>
+                  <option value="CMPDI">CMPDI (Exploration & Design)</option>
+                  <option value="WCL">WCL (Western)</option>
+                  <option value="ECL">ECL (Eastern)</option>
+                  <option value="NCL">NCL (Northern)</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between pt-2 border-t border-brand-200/60">
+              <span className="text-[11px] text-ink-500">
+                {selectedUploadFile
+                  ? `Selected: ${selectedUploadFile.name} (${(selectedUploadFile.size / 1024).toFixed(1)} KB)`
+                  : 'Supported formats: .pdf, .xlsx, .csv, .txt up to 25 MB'}
+              </span>
+              <Button
+                variant="primary"
+                icon={isUploading ? Loader2 : UploadCloud}
+                onClick={handleUploadAndIndex}
+                disabled={isUploading || !selectedUploadFile}
+              >
+                {isUploading ? 'Extracting & Indexing Corpus…' : 'Start AI Ingestion & Re-Index'}
+              </Button>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* Top Intelligence KPI Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -522,7 +705,7 @@ export default function WordCloudTopics() {
         </Card>
       )}
 
-      {/* FULL-WIDTH DEDICATED SEARCH & EVIDENCE INSPECTOR (NOT PUSHED ON THE SIDE!) */}
+      {/* FULL-WIDTH DEDICATED SEARCH & EVIDENCE INSPECTOR WITH CLICKABLE REDIRECTS */}
       <div ref={evidenceRef} className="scroll-mt-4">
         <Card className="p-6 border-2 border-brand-200/80 shadow-md bg-white">
           <div className="space-y-6">
@@ -534,7 +717,7 @@ export default function WordCloudTopics() {
                     {activeWord?.category || 'Corpus Keyword'}
                   </span>
                   <span className="text-xs text-ink-500 font-medium">
-                    Verified Ground-Truth Document Evidence
+                    Verified Ground-Truth Document Evidence (Click Document to Open & View Extracted Figures)
                   </span>
                 </div>
                 <h2 className="text-2xl font-black text-ink-900 capitalize tracking-tight flex items-center gap-2">
@@ -550,7 +733,7 @@ export default function WordCloudTopics() {
                   icon={Bot}
                   onClick={() => navigate('/copilot')}
                 >
-                  Analyze with Copilot
+                  Analyze in Copilot
                 </Button>
                 {searchQuery && (
                   <Button
@@ -600,62 +783,92 @@ export default function WordCloudTopics() {
               </div>
             ) : null}
 
-            {/* Verified Document Citations & Match Excerpts */}
+            {/* Verified Document Citations & Match Excerpts (CLICKABLE REDIRECTS) */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-ink-600 flex items-center gap-1.5">
                   <Database size={14} className="text-brand-600" />
-                  Matching Documents & Contextual Excerpts
+                  Matching Documents & Contextual Excerpts (Click to Open)
                 </h4>
-                <span className="text-xs text-ink-500">
+                <span className="text-xs text-ink-500 font-medium">
                   {activeWord?.sources?.length || 0} citations detected
                 </span>
               </div>
 
               {activeWord?.sources && activeWord.sources.length > 0 ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {activeWord.sources.map((s, sIdx) => {
                     const isNotice = s.name?.startsWith('Notice:');
                     const isFlag = s.name?.startsWith('Statutory Flag');
+                    const isDoc = !isNotice && !isFlag;
+
                     return (
                       <div
                         key={sIdx}
-                        className="rounded-xl border border-border bg-white p-4 space-y-2 hover:border-brand-400 hover:shadow-xs transition"
+                        onClick={() => handleDocumentRedirect(s)}
+                        className="rounded-xl border border-border bg-white p-4 space-y-3 hover:border-brand-500 hover:ring-2 hover:ring-brand-200/80 hover:shadow-md transition cursor-pointer group flex flex-col justify-between"
+                        title="Click to view full record and extracted figures"
                       >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex items-center gap-2 min-w-0">
-                            {isNotice ? (
-                              <Bell size={16} className="text-amber-600 shrink-0 mt-0.5" />
-                            ) : isFlag ? (
-                              <AlertTriangle size={16} className="text-rose-600 shrink-0 mt-0.5" />
-                            ) : (
-                              <FileText size={16} className="text-brand-600 shrink-0 mt-0.5" />
-                            )}
-                            <div className="truncate">
-                              <h5 className="font-bold text-ink-900 text-xs truncate" title={s.name}>
-                                {s.name}
-                              </h5>
-                              <span className="text-[10px] text-ink-500 font-mono">
-                                ID: {s.id || `DOC-${sIdx + 1}`}
-                              </span>
+                        <div className="space-y-2">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              {isNotice ? (
+                                <span className="p-2 rounded-lg bg-amber-50 text-amber-600 border border-amber-200">
+                                  <Bell size={18} />
+                                </span>
+                              ) : isFlag ? (
+                                <span className="p-2 rounded-lg bg-rose-50 text-rose-600 border border-rose-200">
+                                  <AlertTriangle size={18} />
+                                </span>
+                              ) : (
+                                <span className="p-2 rounded-lg bg-brand-50 text-brand-600 border border-brand-200">
+                                  <FileText size={18} />
+                                </span>
+                              )}
+                              <div className="truncate">
+                                <h5 className="font-bold text-ink-900 text-sm truncate group-hover:text-brand-700 transition" title={s.name}>
+                                  {s.name}
+                                </h5>
+                                <div className="flex items-center gap-2 mt-0.5 text-[10px] text-ink-500 font-mono">
+                                  <span>ID: {s.id || `DOC-${sIdx + 1}`}</span>
+                                  <span>•</span>
+                                  <span className="text-brand-700 font-semibold uppercase">
+                                    {isNotice ? 'Official Notice' : isFlag ? 'Statutory Flag' : 'Repository Record'}
+                                  </span>
+                                </div>
+                              </div>
                             </div>
+                            <span className="shrink-0 text-[11px] font-bold text-brand-700 bg-brand-50 border border-brand-200 px-2.5 py-0.5 rounded-full">
+                              {s.count} {s.count === 1 ? 'hit' : 'hits'}
+                            </span>
                           </div>
-                          <span className="shrink-0 text-[11px] font-bold text-brand-700 bg-brand-50 border border-brand-200 px-2 py-0.5 rounded-full">
-                            {s.count} {s.count === 1 ? 'hit' : 'hits'}
-                          </span>
+
+                          {s.snippet ? (
+                            <div className="p-3 rounded-lg bg-surface-canvas border border-border text-xs text-ink-700 leading-relaxed font-sans">
+                              <span className="text-ink-400 select-none">“</span>
+                              {renderHighlightedSnippet(s.snippet, activeWord?.text)}
+                              <span className="text-ink-400 select-none">”</span>
+                            </div>
+                          ) : (
+                            <div className="p-2.5 rounded bg-surface-sunken text-[11px] text-ink-500 italic">
+                              Term identified across production ledgers, compliance notices, and geological records.
+                            </div>
+                          )}
                         </div>
 
-                        {s.snippet ? (
-                          <div className="p-2.5 rounded-lg bg-surface-canvas border border-border text-xs text-ink-700 leading-relaxed font-sans">
-                            <span className="text-ink-400 select-none">“</span>
-                            {renderHighlightedSnippet(s.snippet, activeWord?.text)}
-                            <span className="text-ink-400 select-none">”</span>
-                          </div>
-                        ) : (
-                          <div className="p-2 rounded bg-surface-sunken text-[11px] text-ink-500 italic">
-                            Term identified across production ledgers, compliance notices, and geological records.
-                          </div>
-                        )}
+                        {/* Interactive Clickable Redirect Footer */}
+                        <div className="pt-2 border-t border-border flex items-center justify-between text-xs">
+                          <span className="text-ink-500 text-[11px]">
+                            {isNotice
+                              ? 'Directs to Notice Board'
+                              : isFlag
+                              ? 'Directs to Compliance Ledger'
+                              : 'Directs to Document Studio'}
+                          </span>
+                          <span className="inline-flex items-center gap-1 font-bold text-brand-700 group-hover:text-brand-900 group-hover:translate-x-0.5 transition">
+                            View Extracted Data <ExternalLink size={13} />
+                          </span>
+                        </div>
                       </div>
                     );
                   })}
@@ -711,7 +924,7 @@ export default function WordCloudTopics() {
 
                 <div className="mt-3.5">
                   <p className="text-[10px] font-bold text-ink-500 uppercase tracking-wider mb-2">
-                    Core Keywords (Click to Filter)
+                    Core Keywords (Click to Filter & View Evidence)
                   </p>
                   <div className="flex flex-wrap gap-1.5">
                     {t.keyTerms.map((kw, i) => (
@@ -726,7 +939,7 @@ export default function WordCloudTopics() {
                           else if (evidenceRef.current) evidenceRef.current.scrollIntoView({ behavior: 'smooth' });
                         }}
                         className="text-xs bg-surface-canvas hover:bg-brand-100 hover:text-brand-900 text-ink-700 px-2.5 py-1 rounded-md border border-border transition cursor-pointer"
-                        title={`Filter by "${kw}"`}
+                        title={`Filter and inspect citations for "${kw}"`}
                       >
                         {kw}
                       </button>

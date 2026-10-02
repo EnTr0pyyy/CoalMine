@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   UploadCloud,
   FileText,
@@ -91,6 +91,9 @@ const HISTORICAL_TRACEABILITY_DATA = {
 
 export default function DocumentIntelligence() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const targetDocId = searchParams.get('id');
+
   const [activeTab, setActiveTab] = useState('ingest'); // 'ingest' | 'traceability'
   const [selectedTraceSubsidiary, setSelectedTraceSubsidiary] = useState('SECL');
   const [state, setState] = useState({ status: 'loading', documents: [], error: null });
@@ -118,6 +121,16 @@ export default function DocumentIntelligence() {
       if (subs.length > 0) setSelectedSubCode(subs[0].code);
     });
   }, []);
+
+  useEffect(() => {
+    if (targetDocId && state.status === 'success') {
+      setExpandedId(targetDocId);
+      setTimeout(() => {
+        const el = document.getElementById(`doc-card-${targetDocId}`);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 200);
+    }
+  }, [targetDocId, state.status]);
 
   async function handleUpload() {
     if (pendingFiles.length === 0) return;
@@ -233,8 +246,9 @@ export default function DocumentIntelligence() {
                 const StatusIcon = meta.icon;
                 const expanded = expandedId === doc.id;
                 return (
-                  <Card key={doc.id} padded={false}>
-                    <div className="flex items-center justify-between gap-3 px-4 py-3">
+                  <div key={doc.id} id={`doc-card-${doc.id}`} className={`transition-all rounded-xl ${expanded ? 'ring-2 ring-brand-600 shadow-md' : ''}`}>
+                    <Card padded={false}>
+                      <div className="flex items-center justify-between gap-3 px-4 py-3">
                       <div className="flex min-w-0 items-center gap-3">
                         <span className="rounded bg-brand-50 p-2 text-brand-700 border border-brand-100">
                           <FileText size={18} />
@@ -267,7 +281,8 @@ export default function DocumentIntelligence() {
                       </div>
                     )}
                   </Card>
-                );
+                </div>
+              );
               })}
             </div>
           )}

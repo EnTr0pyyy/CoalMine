@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import PageHeader from '../../components/common/PageHeader.jsx';
 import FilterBar from '../../components/common/FilterBar.jsx';
 import LoadingState from '../../components/common/LoadingState.jsx';
@@ -11,8 +12,9 @@ import { NOTICE_CATEGORIES } from '../../data/mockData.js';
 
 export default function NoticeBoard() {
   const { user } = useAuth();
+  const [searchParams] = useSearchParams();
   const [state, setState] = useState({ status: 'loading', notices: [], error: null });
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(searchParams.get('search') || '');
   const [category, setCategory] = useState('');
 
   async function load() {

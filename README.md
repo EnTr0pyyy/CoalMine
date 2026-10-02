@@ -20,12 +20,28 @@ Compiling these reports previously relied heavily on manual assembly across scan
 - Probable manual transcription and calculation errors
 - Limited rapid retrieval of insights from historical records
 
-**CoalSetu** provides a sovereign, offline-first digital solution delivering:
-- **>88% Reduction in Report Preparation Time** (< 2 seconds vs. 6–8 hours manual compilation)
-- **98.8% Data Extraction Accuracy** across scanned PDFs, borehole logs, and production ledgers
-- **94.0% Automation of Repetitive Reporting Workflows**
-- **Tamper-Evident SHA-256 Merkle Audit Trail** for every extracted figure and generated report
-- **Dynamic NLP Word Cloud & Topic Discovery** grounded directly in database records without hardcoding
+**CoalSetu** provides a local-first digital workspace for governance, document processing, and reporting. Current capabilities include:
+- **Tesseract OCR** for full-page and full-document text extraction, with Donut DocVQA for targeted visual field extraction
+- **PDF, CSV, and spreadsheet processing**, including Camelot and pdfplumber table extraction paths
+- **PDF and editable DOCX report exports** through the ML service
+- **PostgreSQL full-text search** across supported governance records
+- **Local AI inference** through Ollama, plus an interactive CIL subsidiary dashboard
+- **SHA-256-linked audit records** and email notification templates
+
+Accuracy and time-saving percentages are intentionally omitted until measured against a documented benchmark dataset.
+
+### Current Capability Readiness
+
+| Capability | Implementation | Readiness |
+|---|---|---|
+| OCR and document intelligence | Tesseract OCR routes, Donut field extraction, and language-pack discovery | Integrated; native Tesseract and language packs must be installed on the host |
+| Mining table extraction | Camelot lattice/stream paths with pdfplumber fallback | Integrated; results depend on PDF quality and table layout |
+| PDF and DOCX report export | WeasyPrint with ReportLab fallback; python-docx for Word | Export endpoints and Reports UI are present |
+| Local AI | Ollama with Gemma 3:1b as the default chat model | Requires Ollama and the model to be available locally |
+| Full-text search | PostgreSQL tsvector/tsquery and GIN indexes for flags, corrective actions, inspections, and notices | Integrated |
+| Email notifications | Nodemailer templates for overdue actions, high-risk flags, inquiry deadlines, and reports | SMTP configuration and automatic event/workflow triggers are still required |
+| Subsidiary analytics | Apache ECharts production, target, offtake, and OBR chart | Dashboard currently uses illustrative default values, not live production figures |
+| Docker and n8n | Compose definitions for PostgreSQL, Redis, n8n, Backend, and ML | Container deployment and scheduled n8n workflows have not been verified |
 
 ---
 
@@ -171,17 +187,23 @@ ollama serve
 You can run the entire platform using any of the three methods below:
 
 ### Method A: One-Click Startup Script (Recommended)
-From the root directory (`new/`), run:
+From the repository root, start the services with the script for your operating system:
+
+```powershell
+.\start-all.ps1
+```
+
+Add `-NoBrowser` to skip opening the app automatically. On Linux or macOS, use:
 
 ```bash
 ./start-all.sh
 ```
 
 This single command will:
-1. Verify Ollama availability
-2. Activate Python virtual environment and launch FastAPI ML service on port `8001`
-3. Launch Node.js Backend & PostgreSQL on port `5000`
-4. Launch Vite React Frontend on port `5173`
+1. Check Ollama availability
+2. Launch the FastAPI ML service on port `8001`
+3. Ensure PostgreSQL is running, then launch the Node.js Backend on port `5000`
+4. Launch the Vite React Frontend on port `5173`
 
 ---
 
@@ -236,6 +258,7 @@ tmux capture-pane -t ml -p | tail -n 25
 Once started, access the platform services at:
 
 - **CoalSetu Web Application**: [http://localhost:5173](http://localhost:5173)
+- **Platform Capabilities Brief**: [http://localhost:5173/platform](http://localhost:5173/platform)
 - **Backend API & Health**: [http://localhost:5000/health](http://localhost:5000/health)
 - **ML Service OpenAPI Docs**: [http://localhost:8001/docs](http://localhost:8001/docs)
 
@@ -262,10 +285,10 @@ The database comes pre-seeded with designated governance roles:
   - *Geological Reserve & Seam Quality Assessment (CMPDI)*
   - *Ministry of Coal Performance & Parliamentary Synthesis*
   - *Inter-Subsidiary Performance & Efficiency Matrix*
-- **Features**: Real-time generation in <2 seconds, baseline manual calculation comparisons, 1-click **PDF and Print export**.
+- **Features**: Report generation, baseline manual-time comparisons, and **PDF, DOCX, and print export**.
 
 ### 2. Automated Word Cloud & Topic NLP (`/topics`)
-- **Dynamic Term Frequency**: Computes exact occurrences (`rawCount`) and frequency across live ingested documents, circulars, and notices in PostgreSQL (no static fallbacks).
+- **Dynamic Term Frequency**: Computes term occurrences across available ingested documents, circulars, and notices; fallback content may be used when live source records are unavailable.
 - **Source Traceability**: Clicking any keyword reveals the matching document names (e.g. `inspection-report-INS-1023-scan.pdf`), occurrences, and sentence excerpts.
 - **Topic Clusters**: Automatic discovery of cross-subsidiary topics (HEMM fleet modernization, coking coal washery yields, FMC rail loading).
 
@@ -278,6 +301,19 @@ The database comes pre-seeded with designated governance roles:
 
 ### 5. Cryptographic Audit Trail (`/audit-logs`)
 - Every report generation, document extraction, and administrative action is chained using **SHA-256 Merkle hashes** with an in-browser verification tool (`/api/audit-logs/verify`).
+
+### 6. Platform Capabilities Brief (`/platform`)
+- Presents the service architecture, API ports, integrations, and readiness notes in one view.
+- Links to the Document Repository, Reports, AI Copilot, Dashboard, and Settings modules.
+
+### 7. Global Search (`/api/search`)
+- PostgreSQL full-text search covers flags, corrective actions, inspections, and notices, with a top-bar search interface.
+
+### 8. Email Notification Templates
+- Nodemailer templates are available for overdue corrective actions, critical flags, parliamentary deadlines, and report delivery. Configure SMTP and triggering workflows before relying on delivery.
+
+### 9. Docker and Workflow Automation
+- `docker-compose.yml` defines PostgreSQL, Redis, n8n, Backend, and ML services. Container deployment and scheduled n8n workflows require separate setup and verification.
 
 ---
 
@@ -327,7 +363,7 @@ cd Frontend && npm run build
 
 ---
 
-## 🔒 Confidentiality & Zero-Push Policy
+## 🔒 Security & Deployment Notes
 
 > [!IMPORTANT]
-> **Strict Local Confinement**: All code, configurations, data models, and dependencies must remain strictly on local environments. **No remote push operations are configured or permitted.**
+> Do not commit `.env` files, credentials, SMTP passwords, or real mine documents. Replace development JWT secrets and database passwords before shared deployment. Configure and test SMTP separately; email templates alone do not confirm delivery. Docker image availability and n8n workflow behavior must be verified in the target environment.

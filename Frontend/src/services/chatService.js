@@ -263,7 +263,7 @@ export async function uploadDocument(file) {
   const formData = new FormData();
   formData.append('file', file);
 
-  const res = await fetch(`${API_BASE_URL}/documents`, {
+  const res = await fetch(`${API_BASE_URL}/chat/documents`, {
     method: 'POST',
     headers: {
       'X-User-Id': userId,
@@ -285,7 +285,7 @@ export async function uploadDocument(file) {
  */
 export async function getDocuments() {
   try {
-    const res = await fetch(`${API_BASE_URL}/documents`, {
+    const res = await fetch(`${API_BASE_URL}/chat/documents`, {
       headers: getAuthHeaders(),
     });
     if (res.ok) {
@@ -303,7 +303,7 @@ export async function getDocuments() {
  */
 export async function getDocumentChunks(documentId) {
   try {
-    const res = await fetch(`${API_BASE_URL}/documents/${documentId}/chunks`, {
+    const res = await fetch(`${API_BASE_URL}/chat/documents/${documentId}/chunks`, {
       headers: getAuthHeaders(),
     });
     if (res.ok) {
@@ -320,7 +320,7 @@ export async function getDocumentChunks(documentId) {
  */
 export async function deleteDocument(documentId) {
   try {
-    const res = await fetch(`${API_BASE_URL}/documents/${documentId}`, {
+    const res = await fetch(`${API_BASE_URL}/chat/documents/${documentId}`, {
       method: 'DELETE',
       headers: getAuthHeaders(),
     });

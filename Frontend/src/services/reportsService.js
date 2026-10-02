@@ -17,5 +17,14 @@ export const reportsService = {
 
   generateReport: async (payload) => {
     return apiClient.post('/reports', payload);
+  },
+
+  analyzeAndGenerateFromUpload: async (file, { templateType, subsidiary, period } = {}) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (templateType) formData.append('templateType', templateType);
+    if (subsidiary) formData.append('subsidiary', subsidiary);
+    if (period) formData.append('period', period);
+    return apiClient.postForm('/reports/analyze-upload', formData);
   }
 };

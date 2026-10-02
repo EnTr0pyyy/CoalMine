@@ -127,17 +127,18 @@ export default function DocumentIntelligence() {
       for (const file of pendingFiles) {
         const isPdf = file.name?.toLowerCase().endsWith('.pdf');
         const isSheet = file.name?.toLowerCase().endsWith('.xlsx') || file.name?.toLowerCase().endsWith('.csv');
-        const doc = await documentService.uploadDocument({
+        const isImage = /\.(jpe?g|png|webp)$/i.test(file.name);
+        await documentService.uploadDocument(file, {
           name: file.name,
-          fileType: isSheet ? 'Spreadsheet' : isPdf ? 'PDF' : 'Image',
+          fileType: isSheet ? 'Spreadsheet' : isPdf ? 'PDF' : isImage ? 'Image' : 'Document',
           mineId: selectedSubCode,
           mineName: sub ? `${sub.code} — ${sub.name}` : selectedSubCode,
         });
-        await load();
-        documentService.processDocument(doc.id).then(load);
       }
       setPendingFiles([]);
       setShowUploader(false);
+    } catch (err) {
+      console.error('Document upload error:', err);
     } finally {
       setUploading(false);
       await load();

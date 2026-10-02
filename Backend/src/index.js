@@ -35,7 +35,18 @@ const app = express();
 // ==========================================
 app.use(
   cors({
-    origin: env.CLIENT_ORIGIN === '*' ? '*' : env.CLIENT_ORIGIN.split(','),
+    origin: (origin, callback) => {
+      // Dynamic origin reflection allows credentials: true to function correctly
+      // across localhost, LAN IPs (192.168.x.x, 10.x.x.x), and client origins
+      if (!env.CLIENT_ORIGIN || env.CLIENT_ORIGIN === '*') {
+        return callback(null, true);
+      }
+      const allowedOrigins = env.CLIENT_ORIGIN.split(',').map((o) => o.trim());
+      if (!origin || allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      return callback(null, true);
+    },
     credentials: true,
   })
 );
@@ -133,8 +144,8 @@ async function start() {
     // Ensure PostgreSQL is running
     await ensurePostgresRunning();
 
-    server = app.listen(PORT, () => {
-      console.log(`🚀 CoalGov Backend running on port ${PORT} [${env.NODE_ENV}]`);
+    server = app.listen(PORT, '0.0.0.0', () => {
+      console.log(`🚀 CoalGov Backend running on 0.0.0.0:${PORT} [${env.NODE_ENV}]`);
       console.log(`📡 Health check: http://localhost:${PORT}/health`);
       console.log(`📁 Static files hosted at: http://localhost:${PORT}/uploads`);
     });

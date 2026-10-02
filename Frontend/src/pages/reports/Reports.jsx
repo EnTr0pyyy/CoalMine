@@ -1,16 +1,18 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import {
   FileBarChart,
-  Download,
   Loader2,
   Clock,
   CheckCircle2,
   Sparkles,
-  TrendingUp,
-  Building2,
-  Calendar,
   Layers,
-  Printer
+  Printer,
+  UploadCloud,
+  FileSpreadsheet,
+  FileText,
+  ShieldCheck,
+  Check,
+  AlertCircle
 } from 'lucide-react';
 import PageHeader from '../../components/common/PageHeader.jsx';
 import Card from '../../components/common/Card.jsx';
@@ -28,9 +30,14 @@ export default function Reports() {
   const [selectedTemplate, setSelectedTemplate] = useState('MONTHLY_PRODUCTION_OFFTAKE');
   const [selectedSubsidiary, setSelectedSubsidiary] = useState('SECL');
   const [selectedPeriod, setSelectedPeriod] = useState('FY 2023-24 (Q4)');
+  const [generationMode, setGenerationMode] = useState('DATABASE'); // 'DATABASE' | 'UPLOAD'
+  const [uploadedFile, setUploadedFile] = useState(null);
   const [generating, setGenerating] = useState(false);
   const [report, setReport] = useState(null);
   const [platformStats, setPlatformStats] = useState(null);
+  const [uploadError, setUploadError] = useState(null);
+
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     reportsService.getTemplates().then((tpls) => {
@@ -48,20 +55,51 @@ export default function Reports() {
   async function handleGenerate() {
     setGenerating(true);
     setReport(null);
+    setUploadError(null);
     try {
-      const result = await reportsService.generateAutomatedReport({
-        templateType: selectedTemplate,
-        subsidiary: selectedSubsidiary,
-        period: selectedPeriod,
-      });
+      let result;
+      if (generationMode === 'UPLOAD') {
+        if (!uploadedFile) {
+          setUploadError('Please select a document or spreadsheet to analyze.');
+          setGenerating(false);
+          return;
+        }
+        result = await reportsService.analyzeAndGenerateFromUpload(uploadedFile, {
+          templateType: selectedTemplate,
+          subsidiary: selectedSubsidiary,
+          period: selectedPeriod,
+        });
+      } else {
+        result = await reportsService.generateAutomatedReport({
+          templateType: selectedTemplate,
+          subsidiary: selectedSubsidiary,
+          period: selectedPeriod,
+        });
+      }
       setReport(result);
       analyticsService.getPlatformStats().then((data) => {
         if (data) setPlatformStats(data);
       });
     } catch (err) {
       console.error('Failed to generate report:', err);
+      setUploadError(err.message || 'Report generation failed. Please try again.');
     } finally {
       setGenerating(false);
+    }
+  }
+
+  function handleFileDrop(e) {
+    e.preventDefault();
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      setUploadedFile(e.dataTransfer.files[0]);
+      setUploadError(null);
+    }
+  }
+
+  function handleFileSelect(e) {
+    if (e.target.files && e.target.files[0]) {
+      setUploadedFile(e.target.files[0]);
+      setUploadError(null);
     }
   }
 
@@ -155,9 +193,102 @@ export default function Reports() {
 
       {/* Configuration & Parameters Card */}
       <Card className="p-6">
-        <h3 className="text-base font-semibold text-ink-900 mb-4 flex items-center gap-2">
-          <Layers size={18} className="text-brand-600" /> Report Specification & Source Selection
-        </h3>
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4 pb-4 border-b border-border">
+          <h3 className="text-base font-semibold text-ink-900 flex items-center gap-2">
+            <Layers size={18} className="text-brand-600" /> Report Specification & Source Selection
+          </h3>
+
+          {/* Source Mode Tabs */}
+          <div className="flex items-center rounded-lg border border-border p-1 bg-surface-sunken">
+            <button
+              onClick={() => { setGenerationMode('DATABASE'); setUploadError(null); }}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition ${
+                generationMode === 'DATABASE'
+                  ? 'bg-white text-ink-900 shadow-xs font-semibold'
+                  : 'text-ink-600 hover:text-ink-900'
+              }`}
+            >
+              Synthesize from Database
+            </button>
+            <button
+              onClick={() => { setGenerationMode('UPLOAD'); setUploadError(null); }}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition flex items-center gap-1.5 ${
+                generationMode === 'UPLOAD'
+                  ? 'bg-white text-brand-900 shadow-xs font-semibold'
+                  : 'text-ink-600 hover:text-ink-900'
+              }`}
+            >
+              <UploadCloud size={14} className="text-brand-600" />
+              Upload & Analyze Source File
+            </button>
+          </div>
+        </div>
+
+        {/* Upload Dropzone if in UPLOAD mode */}
+        {generationMode === 'UPLOAD' && (
+          <div className="mb-6 rounded-xl border-2 border-dashed border-brand-300 bg-brand-50/40 p-6 text-center">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf,.csv,.xlsx,.xls,.txt"
+              className="hidden"
+              onChange={handleFileSelect}
+            />
+
+            {!uploadedFile ? (
+              <div
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={handleFileDrop}
+                className="flex flex-col items-center justify-center cursor-pointer"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-brand-100 text-brand-700 mb-3">
+                  <UploadCloud size={24} />
+                </div>
+                <h4 className="text-sm font-semibold text-ink-900 mb-1">
+                  Click or drag source document / ledger here to analyze
+                </h4>
+                <p className="text-xs text-ink-500 mb-3">
+                  Supports scanned PDFs, borehole logs, monthly production Excel (.xlsx), and CSV files up to 25 MB
+                </p>
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md bg-white border border-border text-xs font-medium text-ink-700 shadow-2xs">
+                  Browse Files
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between bg-white p-4 rounded-lg border border-brand-200 text-left">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-100 text-brand-700">
+                    {uploadedFile.name.endsWith('.csv') || uploadedFile.name.endsWith('.xlsx') ? (
+                      <FileSpreadsheet size={22} />
+                    ) : (
+                      <FileText size={22} />
+                    )}
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-ink-900">{uploadedFile.name}</p>
+                    <p className="text-xs text-ink-500">
+                      {(uploadedFile.size / 1024).toFixed(1)} KB · Ready for Multimodal Extraction
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => { setUploadedFile(null); if (fileInputRef.current) fileInputRef.current.value = ''; }}
+                  className="text-xs font-semibold text-status-critical hover:underline"
+                >
+                  Change File
+                </button>
+              </div>
+            )}
+
+            {uploadError && (
+              <div className="mt-3 flex items-center justify-center gap-1.5 text-xs text-status-critical font-medium">
+                <AlertCircle size={14} /> {uploadError}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <div>
             <label className="mb-1 block text-xs font-medium text-ink-700">Report Template</label>
@@ -219,7 +350,9 @@ export default function Reports() {
         <div className="mt-6 flex flex-wrap items-center justify-between border-t border-border pt-4">
           <div className="flex items-center gap-2 text-xs text-ink-500">
             <span className="h-2 w-2 rounded-full bg-emerald-500"></span>
-            Connected to local Gemma AI and CMPDI Borehole Database
+            {generationMode === 'UPLOAD'
+              ? 'Multimodal Document Vision & PyMuPDF Extraction Engine Active'
+              : 'Connected to local Gemma AI and CMPDI Borehole Database'}
           </div>
           <Button
             icon={generating ? Loader2 : FileBarChart}
@@ -227,7 +360,11 @@ export default function Reports() {
             disabled={generating}
             className="px-6"
           >
-            {generating ? 'Compiling Datasets…' : 'Generate Automated Report'}
+            {generating
+              ? 'Analyzing & Compiling…'
+              : generationMode === 'UPLOAD'
+              ? 'Analyze Upload & Generate'
+              : 'Generate Automated Report'}
           </Button>
         </div>
       </Card>
@@ -237,7 +374,9 @@ export default function Reports() {
         <Card className="p-8 text-center">
           <div className="flex flex-col items-center justify-center gap-3">
             <Loader2 size={36} className="animate-spin text-brand-600" />
-            <h4 className="text-base font-semibold text-ink-900">Synthesizing Geological & Mining Figures</h4>
+            <h4 className="text-base font-semibold text-ink-900">
+              {generationMode === 'UPLOAD' ? 'Extracting Figures & Parsing Uploaded File' : 'Synthesizing Geological & Mining Figures'}
+            </h4>
             <p className="text-xs text-ink-500 max-w-md">
               Extracting tables from scanned PDFs, reconciling subsidiary spreadsheets, and generating executive narrative using local Gemma 3 model…
             </p>
@@ -251,10 +390,17 @@ export default function Reports() {
           {/* Header Action Bar */}
           <div className="flex items-center justify-between bg-white p-4 rounded-lg border border-border shadow-sm">
             <div>
-              <span className="text-xs font-semibold uppercase tracking-wider text-brand-600">
-                Official Ministry Document
-              </span>
-              <h2 className="text-xl font-bold text-ink-900">{report.reportTitle}</h2>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold uppercase tracking-wider text-brand-600">
+                  Official Ministry Document
+                </span>
+                {report.uploadedSource && (
+                  <span className="inline-flex items-center gap-1 rounded bg-brand-100 px-2 py-0.5 text-[10px] font-bold text-brand-800">
+                    <Check size={10} /> Verified Uploaded Source
+                  </span>
+                )}
+              </div>
+              <h2 className="text-xl font-bold text-ink-900 mt-0.5">{report.reportTitle}</h2>
               <p className="text-xs text-ink-500">
                 Generated at {report.generatedAt} · Prepared in {report.generationTimeSeconds}s
               </p>
@@ -268,6 +414,41 @@ export default function Reports() {
               </button>
             </div>
           </div>
+
+          {/* Uploaded Source Verification Badge (if report was generated from upload) */}
+          {report.uploadedSource && (
+            <Card className="p-4 bg-emerald-50/50 border border-emerald-200">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700 shrink-0">
+                    <ShieldCheck size={20} />
+                  </div>
+                  <div>
+                    <span className="text-xs font-bold text-emerald-900">
+                      Grounded in Uploaded File: {report.uploadedSource.filename}
+                    </span>
+                    <p className="text-xs text-emerald-800/80">
+                      Parsed {report.uploadedSource.rowCount} records ({report.uploadedSource.format}) · SHA-256 Checksum: <code className="text-[10px] font-mono bg-emerald-100 px-1 py-0.5 rounded">{report.uploadedSource.checksum ? `${report.uploadedSource.checksum.slice(0, 16)}…` : 'Verified'}</code>
+                    </p>
+                  </div>
+                </div>
+                {report.uploadedSource.extractedFigures && (
+                  <div className="flex items-center gap-3 text-xs text-emerald-900 font-medium">
+                    {report.uploadedSource.extractedFigures.productionMT && (
+                      <span className="bg-white/80 px-2.5 py-1 rounded border border-emerald-200">
+                        Production: <strong>{report.uploadedSource.extractedFigures.productionMT} MT</strong>
+                      </span>
+                    )}
+                    {report.uploadedSource.extractedFigures.obrMCum && (
+                      <span className="bg-white/80 px-2.5 py-1 rounded border border-emerald-200">
+                        OBR: <strong>{report.uploadedSource.extractedFigures.obrMCum} M.Cu.m</strong>
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            </Card>
+          )}
 
           {/* Time Savings Scorecard */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
@@ -325,13 +506,13 @@ export default function Reports() {
           {report.tabularBreakdown?.map((tbl, idx) => (
             <Card key={idx} className="p-6">
               <h3 className="text-sm font-semibold uppercase tracking-wider text-ink-500 mb-4">
-                3. Tabular Production & Logistics Data: {tbl.title}
+                3. Tabular Production & Logistics Data: {tbl.title || tbl.sheetName || 'Operational Data'}
               </h3>
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-sm border-collapse">
                   <thead>
                     <tr className="border-b border-border bg-slate-100 text-xs font-semibold text-ink-700">
-                      {tbl.columns?.map((col, cIdx) => (
+                      {(tbl.columns || tbl.headers)?.map((col, cIdx) => (
                         <th key={cIdx} className="p-3">{col}</th>
                       ))}
                     </tr>
@@ -339,11 +520,13 @@ export default function Reports() {
                   <tbody>
                     {tbl.rows?.map((row, rIdx) => (
                       <tr key={rIdx} className="border-b border-border hover:bg-slate-50">
-                        {row.map((val, vIdx) => (
+                        {Array.isArray(row) ? row.map((val, vIdx) => (
                           <td key={vIdx} className={`p-3 ${vIdx === 0 ? 'font-medium text-ink-900' : 'text-ink-700'}`}>
                             {val}
                           </td>
-                        ))}
+                        )) : (
+                          <td className="p-3 font-medium text-ink-900">{JSON.stringify(row)}</td>
+                        )}
                       </tr>
                     ))}
                   </tbody>

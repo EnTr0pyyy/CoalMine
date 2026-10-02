@@ -29,21 +29,32 @@ const storage = multer.diskStorage({
   },
 });
 
-// File filter: accept PDFs and common images for evidence
+// File filter: accept PDFs, spreadsheets (CSV, XLSX), text files, DOCX, and images
 const fileFilter = (_req, file, cb) => {
+  const allowedExtensions = ['.pdf', '.csv', '.tsv', '.xlsx', '.xls', '.txt', '.doc', '.docx', '.jpg', '.jpeg', '.png', '.webp'];
+  const ext = path.extname(file.originalname).toLowerCase();
+
   const allowedMimeTypes = [
     'application/pdf',
+    'text/csv',
+    'text/plain',
+    'text/tab-separated-values',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-excel',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     'image/jpeg',
     'image/png',
     'image/webp',
+    'application/octet-stream',
   ];
 
-  if (allowedMimeTypes.includes(file.mimetype)) {
+  if (allowedExtensions.includes(ext) || allowedMimeTypes.includes(file.mimetype)) {
     cb(null, true);
   } else {
     cb(
       new Error(
-        `Invalid file type: ${file.mimetype}. Only PDF documents and image files (.jpg, .png, .webp) are allowed.`
+        `Invalid file type: ${file.mimetype} (${ext}). Supported formats: PDF, CSV, XLSX, TXT, DOCX, and images.`
       ),
       false
     );

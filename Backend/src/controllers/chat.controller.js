@@ -363,3 +363,89 @@ exports.clearUserSessions = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
+/**
+ * Upload and index a document into RAG vector knowledge base
+ */
+exports.uploadRagDocument = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'No file uploaded' });
+    }
+
+    const fs = require('fs');
+    const fileBytes = fs.readFileSync(req.file.path);
+    const form = new FormData();
+    form.append('file', new Blob([fileBytes]), req.file.originalname);
+
+    const mlRes = await fetch(`${ML_SERVICE_URL}/rag/ingest`, {
+      method: 'POST',
+      body: form,
+    });
+
+    if (!mlRes.ok) {
+      const errText = await mlRes.text();
+      return res.status(mlRes.status).json({ success: false, message: errText });
+    }
+
+    const data = await mlRes.json();
+    return res.status(200).json(data);
+  } catch (error) {
+    console.error('uploadRagDocument error:', error.message);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Retrieve list of ingested RAG documents
+ */
+exports.getRagDocuments = async (_req, res) => {
+  try {
+    const mlRes = await fetch(`${ML_SERVICE_URL}/rag/documents`);
+    if (!mlRes.ok) {
+      return res.status(200).json({ documents: [] });
+    }
+    const data = await mlRes.json();
+    return res.status(200).json(data);
+  } catch (error) {
+    console.warn('getRagDocuments fetch failed:', error.message);
+    return res.status(200).json({ documents: [] });
+  }
+};
+
+/**
+ * Get chunks for a specific RAG document
+ */
+exports.getRagDocumentChunks = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const mlRes = await fetch(`${ML_SERVICE_URL}/rag/documents/${id}/chunks`);
+    if (!mlRes.ok) {
+      return res.status(mlRes.status).json({ success: false, message: 'Document chunks not found' });
+    }
+    const data = await mlRes.json();
+    return res.status(200).json(data);
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Delete a RAG document from knowledge base
+ */
+exports.deleteRagDocument = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const mlRes = await fetch(`${ML_SERVICE_URL}/rag/documents/${id}`, {
+      method: 'DELETE',
+    });
+    if (!mlRes.ok) {
+      const err = await mlRes.text();
+      return res.status(mlRes.status).json({ success: false, message: err });
+    }
+    const data = await mlRes.json();
+    return res.status(200).json(data);
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};

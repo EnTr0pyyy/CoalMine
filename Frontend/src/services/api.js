@@ -10,7 +10,26 @@
 // via env) switches every service to real HTTP calls through
 // apiClient without touching a single page component.
 
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+export function getApiBaseUrl() {
+  const envUrl = import.meta.env.VITE_API_BASE_URL;
+
+  // 1. If explicit relative path or custom external URL is configured, honor it:
+  if (envUrl && envUrl.startsWith('/')) {
+    return envUrl;
+  }
+  if (envUrl && !envUrl.includes('localhost') && !envUrl.includes('127.0.0.1')) {
+    return envUrl;
+  }
+
+  // 2. In browser environments:
+  // Using relative '/api' leverages Vite's reverse proxy in dev & preview.
+  // This automatically routes through the active host/origin (e.g. http://192.168.x.x:5173/api),
+  // preventing CORS rejections, Private Network Access blocks, and localhost port 5000 connection failures
+  // when accessed across LAN/Wi-Fi devices.
+  return '/api';
+}
+
+export const API_BASE_URL = getApiBaseUrl();
 
 // Toggle for the whole app. Reads from VITE_USE_MOCKS (default: false when not set to 'true').
 export const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
@@ -33,8 +52,12 @@ class ApiError extends Error {
 
 async function request(path, { method = 'GET', body, headers, signal } = {}) {
   const token = localStorage.getItem('minegov_auth_token');
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  const targetUrl = API_BASE_URL.endsWith('/')
+    ? `${API_BASE_URL.slice(0, -1)}${cleanPath}`
+    : `${API_BASE_URL}${cleanPath}`;
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(targetUrl, {
     method,
     signal,
     headers: {
@@ -55,9 +78,37 @@ async function request(path, { method = 'GET', body, headers, signal } = {}) {
   return payload;
 }
 
+async function requestForm(path, formData, { method = 'POST', headers, signal } = {}) {
+  const token = localStorage.getItem('minegov_auth_token');
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  const targetUrl = API_BASE_URL.endsWith('/')
+    ? `${API_BASE_URL.slice(0, -1)}${cleanPath}`
+    : `${API_BASE_URL}${cleanPath}`;
+
+  const response = await fetch(targetUrl, {
+    method,
+    signal,
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...headers,
+    },
+    body: formData,
+  });
+
+  const isJson = response.headers.get('content-type')?.includes('application/json');
+  const payload = isJson ? await response.json() : await response.text();
+
+  if (!response.ok) {
+    throw new ApiError(payload?.message || response.statusText, response.status, payload);
+  }
+
+  return payload;
+}
+
 export const apiClient = {
   get: (path, opts) => request(path, { ...opts, method: 'GET' }),
   post: (path, body, opts) => request(path, { ...opts, method: 'POST', body }),
+  postForm: (path, formData, opts) => requestForm(path, formData, { ...opts, method: 'POST' }),
   patch: (path, body, opts) => request(path, { ...opts, method: 'PATCH', body }),
   put: (path, body, opts) => request(path, { ...opts, method: 'PUT', body }),
   delete: (path, opts) => request(path, { ...opts, method: 'DELETE' }),

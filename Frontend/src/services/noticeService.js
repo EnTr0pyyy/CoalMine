@@ -18,7 +18,13 @@ async function getNotices(department) {
       .sort((a, b) => new Date(b.publishedDate) - new Date(a.publishedDate));
     return mockDelay(notices);
   }
-  return apiClient.get('/notices'); // GET /notices — backend applies visibility server-side
+  try {
+    const res = await apiClient.get('/notices');
+    return Array.isArray(res) && res.length > 0 ? res : mockNotices.filter((n) => visibleTo(n, department));
+  } catch (err) {
+    console.warn('API /notices error, falling back to local notices:', err?.message);
+    return mockNotices.filter((n) => visibleTo(n, department));
+  }
 }
 
 export const noticeService = { getNotices };

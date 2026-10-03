@@ -7,7 +7,13 @@ let flags = [...mockFlags];
 
 async function getFlags() {
   if (USE_MOCKS) return mockDelay([...flags].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)));
-  return apiClient.get('/flags'); // GET /flags
+  try {
+    const res = await apiClient.get('/flags');
+    return Array.isArray(res) && res.length > 0 ? res : [...flags].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  } catch (err) {
+    console.warn('API /flags error, falling back to local flags:', err?.message);
+    return [...flags].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  }
 }
 
 async function getRecentFlags(limit = 5) {
@@ -15,22 +21,42 @@ async function getRecentFlags(limit = 5) {
     const sorted = [...flags].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
     return mockDelay(sorted.slice(0, limit));
   }
-  return apiClient.get(`/flags?sort=-createdAt&limit=${limit}`);
+  try {
+    const res = await apiClient.get(`/flags?sort=-createdAt&limit=${limit}`);
+    return Array.isArray(res) && res.length > 0 ? res : [...flags].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, limit);
+  } catch (err) {
+    return [...flags].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, limit);
+  }
 }
 
 async function getFlagsByCategory() {
   if (USE_MOCKS) return mockDelay(mockFlagsByCategory);
-  return apiClient.get('/flags/stats/by-category');
+  try {
+    const res = await apiClient.get('/flags/stats/by-category');
+    return res || mockFlagsByCategory;
+  } catch (err) {
+    return mockFlagsByCategory;
+  }
 }
 
 async function getFlagById(id) {
   if (USE_MOCKS) return mockDelay(flags.find((f) => f.id === id) ?? null);
-  return apiClient.get(`/flags/${id}`); // GET /flags/:id
+  try {
+    const res = await apiClient.get(`/flags/${id}`);
+    return res || (flags.find((f) => f.id === id) ?? null);
+  } catch (err) {
+    return flags.find((f) => f.id === id) ?? null;
+  }
 }
 
 async function getFlagsForMine(mineId) {
   if (USE_MOCKS) return mockDelay(flags.filter((f) => f.mineId === mineId));
-  return apiClient.get(`/flags?mineId=${mineId}`);
+  try {
+    const res = await apiClient.get(`/flags?mineId=${mineId}`);
+    return Array.isArray(res) && res.length > 0 ? res : flags.filter((f) => f.mineId === mineId);
+  } catch (err) {
+    return flags.filter((f) => f.mineId === mineId);
+  }
 }
 
 async function createFlag(payload) {

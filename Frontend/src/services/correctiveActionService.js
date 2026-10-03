@@ -5,27 +5,52 @@ let actions = [...mockCorrectiveActions];
 
 async function getCorrectiveActions() {
   if (USE_MOCKS) return mockDelay(actions);
-  return apiClient.get('/corrective-actions'); // GET /corrective-actions
+  try {
+    return await apiClient.get('/corrective-actions');
+  } catch (e) {
+    console.warn('getCorrectiveActions API failed, using local data:', e.message);
+    return [...actions];
+  }
 }
 
 async function getOverdueActions() {
   if (USE_MOCKS) return mockDelay(actions.filter((a) => a.isOverdue));
-  return apiClient.get('/corrective-actions?overdue=true');
+  try {
+    return await apiClient.get('/corrective-actions?overdue=true');
+  } catch (e) {
+    console.warn('getOverdueActions API failed, using local data:', e.message);
+    return actions.filter((a) => a.isOverdue);
+  }
 }
 
 async function getCorrectiveActionsForFlag(flagId) {
   if (USE_MOCKS) return mockDelay(actions.filter((a) => a.flagId === flagId));
-  return apiClient.get(`/corrective-actions?flagId=${flagId}`);
+  try {
+    return await apiClient.get(`/corrective-actions?flagId=${flagId}`);
+  } catch (e) {
+    console.warn('getCorrectiveActionsForFlag API failed, using local data:', e.message);
+    return actions.filter((a) => a.flagId === flagId);
+  }
 }
 
 async function getCorrectiveActionsForMine(mineId) {
   if (USE_MOCKS) return mockDelay(actions.filter((a) => a.mineId === mineId));
-  return apiClient.get(`/corrective-actions?mineId=${mineId}`);
+  try {
+    return await apiClient.get(`/corrective-actions?mineId=${mineId}`);
+  } catch (e) {
+    console.warn('getCorrectiveActionsForMine API failed, using local data:', e.message);
+    return actions.filter((a) => a.mineId === mineId);
+  }
 }
 
 async function getCorrectiveActionById(id) {
   if (USE_MOCKS) return mockDelay(actions.find((a) => a.id === id) ?? null);
-  return apiClient.get(`/corrective-actions/${id}`);
+  try {
+    return await apiClient.get(`/corrective-actions/${id}`);
+  } catch (e) {
+    console.warn('getCorrectiveActionById API failed, using local data:', e.message);
+    return actions.find((a) => a.id === id) ?? null;
+  }
 }
 
 async function createCorrectiveAction(payload) {

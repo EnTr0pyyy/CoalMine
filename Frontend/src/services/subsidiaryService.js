@@ -12,6 +12,11 @@ export const subsidiaryService = {
   },
 
   getSubsidiaryByCode: async (code) => {
-    return apiClient.get(`/subsidiaries/${code}`);
+    try {
+      return await apiClient.get(`/subsidiaries/${code}`);
+    } catch (e) {
+      console.warn('getSubsidiaryByCode API failed:', e.message);
+      return null;
+    }
   }
 };

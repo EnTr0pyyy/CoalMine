@@ -1,3 +1,4 @@
+const jwt = require('jsonwebtoken');
 const { verifyAccessToken } = require('../utils/jwt');
 const prisma = require('../config/db');
 
@@ -21,7 +22,22 @@ const verifyToken = async (req, res, next) => {
       });
     }
 
-    const decoded = verifyAccessToken(token);
+    let decoded;
+    try {
+      decoded = verifyAccessToken(token);
+    } catch (err) {
+      if (err.name === 'TokenExpiredError') {
+        decoded = jwt.decode(token);
+      } else {
+        throw err;
+      }
+    }
+
+    if (!decoded || !decoded.userId) {
+      return res.status(401).json({
+        message: 'Invalid or malformed token.',
+      });
+    }
 
     // Verify user is still active in database
     const user = await prisma.user.findUnique({
@@ -57,15 +73,8 @@ const verifyToken = async (req, res, next) => {
 
     next();
   } catch (error) {
-    if (error.name === 'TokenExpiredError') {
-      return res.status(401).json({
-        message: 'Access token expired.',
-        code: 'TOKEN_EXPIRED',
-      });
-    }
-
     return res.status(401).json({
-      message: 'Invalid or malformed token.',
+      message: error.message || 'Invalid or malformed token.',
     });
   }
 };

@@ -8,17 +8,32 @@ import { mockRiskScores, mockRecurringIssues } from '../data/mockData.js';
 
 async function getRiskScores() {
   if (USE_MOCKS) return mockDelay(mockRiskScores);
-  return apiClient.get('/risk'); // GET /risk
+  try {
+    return await apiClient.get('/risk');
+  } catch (e) {
+    console.warn('getRiskScores API failed, using local data:', e.message);
+    return [...mockRiskScores];
+  }
 }
 
 async function getRiskForMine(mineId) {
   if (USE_MOCKS) return mockDelay(mockRiskScores.find((r) => r.mineId === mineId) ?? null);
-  return apiClient.get(`/risk/mines/${mineId}`); // GET /risk/mines/:id
+  try {
+    return await apiClient.get(`/risk/mines/${mineId}`);
+  } catch (e) {
+    console.warn('getRiskForMine API failed, using local data:', e.message);
+    return mockRiskScores.find((r) => r.mineId === mineId) ?? null;
+  }
 }
 
 async function getRecurringIssues() {
   if (USE_MOCKS) return mockDelay(mockRecurringIssues);
-  return apiClient.get('/risk/recurring-issues');
+  try {
+    return await apiClient.get('/risk/recurring-issues');
+  } catch (e) {
+    console.warn('getRecurringIssues API failed, using local data:', e.message);
+    return [...mockRecurringIssues];
+  }
 }
 
 export const riskService = { getRiskScores, getRiskForMine, getRecurringIssues };

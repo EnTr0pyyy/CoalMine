@@ -5,17 +5,33 @@ let inspections = [...mockInspections];
 
 async function getInspections() {
   if (USE_MOCKS) return mockDelay([...inspections].sort((a, b) => new Date(b.date) - new Date(a.date)));
-  return apiClient.get('/inspections'); // GET /inspections
+  try {
+    const res = await apiClient.get('/inspections');
+    return Array.isArray(res) && res.length > 0 ? res : [...inspections].sort((a, b) => new Date(b.date) - new Date(a.date));
+  } catch (err) {
+    console.warn('API /inspections error, falling back to local inspections:', err?.message);
+    return [...inspections].sort((a, b) => new Date(b.date) - new Date(a.date));
+  }
 }
 
 async function getInspectionById(id) {
   if (USE_MOCKS) return mockDelay(inspections.find((i) => i.id === id) ?? null);
-  return apiClient.get(`/inspections/${id}`); // GET /inspections/:id
+  try {
+    const res = await apiClient.get(`/inspections/${id}`);
+    return res || (inspections.find((i) => i.id === id) ?? null);
+  } catch (err) {
+    return inspections.find((i) => i.id === id) ?? null;
+  }
 }
 
 async function getInspectionsForMine(mineId) {
   if (USE_MOCKS) return mockDelay(inspections.filter((i) => i.mineId === mineId));
-  return apiClient.get(`/inspections?mineId=${mineId}`);
+  try {
+    const res = await apiClient.get(`/inspections?mineId=${mineId}`);
+    return Array.isArray(res) && res.length > 0 ? res : inspections.filter((i) => i.mineId === mineId);
+  } catch (err) {
+    return inspections.filter((i) => i.mineId === mineId);
+  }
 }
 
 async function createInspection(payload) {

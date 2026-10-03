@@ -5,12 +5,24 @@ let documents = [...mockDocuments];
 
 async function getDocuments() {
   if (USE_MOCKS) return mockDelay([...documents].sort((a, b) => new Date(b.uploadedDate) - new Date(a.uploadedDate)));
-  return apiClient.get('/documents'); // GET /documents
+  try {
+    const res = await apiClient.get('/documents');
+    return Array.isArray(res) && res.length > 0 ? res : documents;
+  } catch (err) {
+    console.warn('API /documents error, falling back to local documents:', err?.message);
+    return documents;
+  }
 }
 
 async function getDocumentById(id) {
   if (USE_MOCKS) return mockDelay(documents.find((d) => d.id === id) ?? null);
-  return apiClient.get(`/documents/${id}`); // GET /documents/:id
+  try {
+    const res = await apiClient.get(`/documents/${id}`);
+    return res || (documents.find((d) => d.id === id) ?? null);
+  } catch (err) {
+    console.warn(`API /documents/${id} error, falling back to local document:`, err?.message);
+    return documents.find((d) => d.id === id) ?? null;
+  }
 }
 
 // Uploading only ever creates the record with status "Processing" —

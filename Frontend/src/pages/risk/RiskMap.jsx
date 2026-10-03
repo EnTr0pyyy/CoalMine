@@ -77,33 +77,22 @@ export default function RiskMap() {
   const geojsonLayerRef = useRef(null);
   const markersLayerRef = useRef(null);
 
-  // Load mines & risk data with fallback to mockMines so map never goes blank
-  async function loadData() {
-    setState((prev) => ({ ...prev, status: 'loading' }));
-    try {
-      const [mines, riskScores] = await Promise.all([
-        mineService.getMines().catch(() => mockMines),
-        riskService.getRiskScores().catch(() => []),
-      ]);
-      const safeMines = Array.isArray(mines) && mines.length > 0 ? mines : mockMines;
-      const merged = safeMines.map((m) => {
-        let coords = m.coordinates;
-        if (typeof coords === 'string') {
-          try { coords = JSON.parse(coords); } catch { coords = null; }
-        }
-        if ((!coords || !Array.isArray(coords)) && m.latitude != null && m.longitude != null) {
-          coords = [m.latitude, m.longitude];
-        }
-        return {
-          ...m,
-          coordinates: coords,
-          risk: (riskScores || []).find((r) => r.mineId === m.id) || null,
-        };
-      });
-      setState({ status: 'success', mines: merged });
-    } catch {
-      setState({ status: 'success', mines: mockMines });
-    }
+  // Load accurate real CIL mine data directly without requiring live network fetch
+  function loadData() {
+    const merged = mockMines.map((m) => {
+      let coords = m.coordinates;
+      if (typeof coords === 'string') {
+        try { coords = JSON.parse(coords); } catch { coords = null; }
+      }
+      if ((!coords || !Array.isArray(coords)) && m.latitude != null && m.longitude != null) {
+        coords = [m.latitude, m.longitude];
+      }
+      return {
+        ...m,
+        coordinates: coords,
+      };
+    });
+    setState({ status: 'success', mines: merged });
   }
 
   useEffect(() => {

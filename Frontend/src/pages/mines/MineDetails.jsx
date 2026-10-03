@@ -47,12 +47,12 @@ export default function MineDetails() {
         return;
       }
       const [flags, compliance, inspections, actions, risk, allAudit] = await Promise.all([
-        flagService.getFlagsForMine(id),
-        complianceService.getComplianceForMine(id),
-        inspectionService.getInspectionsForMine(id),
-        correctiveActionService.getCorrectiveActionsForMine(id),
-        riskService.getRiskForMine(id),
-        auditService.getAuditLogs(),
+        flagService.getFlagsForMine(id).catch(() => []),
+        complianceService.getComplianceForMine(id).catch(() => []),
+        inspectionService.getInspectionsForMine(id).catch(() => []),
+        correctiveActionService.getCorrectiveActionsForMine(id).catch(() => []),
+        riskService.getRiskForMine(id).catch(() => null),
+        auditService.getAuditLogs().catch(() => []),
       ]);
       const entityIds = new Set([
         ...flags.map((f) => f.id),

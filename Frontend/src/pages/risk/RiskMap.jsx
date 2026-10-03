@@ -50,43 +50,24 @@ function riskIcon(level) {
   const color = RISK_COLORS[level] || RISK_COLORS.MEDIUM;
   return L.divIcon({
     className: 'custom-mine-pin',
-    html: `<div style="width:22px;height:22px;border-radius:9999px;background:${color};border:2.5px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:transform 0.15s ease;">
-             <div style="width:6px;height:6px;border-radius:9999px;background:white;"></div>
-           </div>`,
-    iconSize: [22, 22],
-    iconAnchor: [11, 11],
-    popupAnchor: [0, -12],
+    html: `
+      <div style="position:relative;width:24px;height:24px;display:flex;align-items:center;justify-content:center;cursor:pointer;">
+        <span style="position:absolute;width:100%;height:100%;border-radius:50%;background:${color};opacity:0.35;animation:ping 2.5s cubic-bezier(0,0,0.2,1) infinite;pointer-events:none;"></span>
+        <div style="width:20px;height:20px;border-radius:50%;background:${color};border:2.5px solid #FFFFFF;box-shadow:0 2px 7px rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;pointer-events:auto;transition:transform 0.15s ease;">
+          <div style="width:6px;height:6px;border-radius:50%;background:#FFFFFF;"></div>
+        </div>
+      </div>
+    `,
+    iconSize: [24, 24],
+    iconAnchor: [12, 12],
+    popupAnchor: [0, -14],
   });
 }
-
-function hqIcon(code) {
-  return L.divIcon({
-    className: 'custom-hq-badge',
-    html: `<div style="padding:2px 7px;border-radius:4px;background:#081B33;color:#F8FAFC;border:1.5px solid #1B4965;font-size:10px;font-weight:700;box-shadow:0 2px 5px rgba(0,0,0,0.35);white-space:nowrap;cursor:pointer;">${code}</div>`,
-    iconSize: [38, 20],
-    iconAnchor: [19, 10],
-    popupAnchor: [0, -10],
-  });
-}
-
-// CIL Subsidiaries & Key Mining Exploration Basins across India
-const CIL_KEY_LOCATIONS = [
-  { code: 'CIL HQ', name: 'Coal India Limited (Apex HQ)', location: 'Kolkata, West Bengal', coordinates: [22.5726, 88.3639], desc: 'National apex holding company headquarters.' },
-  { code: 'CMPDI', name: 'CMPDI Central Headquarters', location: 'Ranchi, Jharkhand', coordinates: [23.3441, 85.3096], desc: 'Pan-India exploration, borehole drilling & geological modeling.' },
-  { code: 'SECL', name: 'South Eastern Coalfields HQ', location: 'Bilaspur, Chhattisgarh', coordinates: [22.0797, 82.1409], desc: 'Gevra, Kusmunda, Dipka mega opencast operations.' },
-  { code: 'MCL', name: 'Mahanadi Coalfields HQ', location: 'Sambalpur, Odisha', coordinates: [21.4669, 83.9812], desc: 'Talcher & Ib Valley coalfields evacuation & FMC rail sidings.' },
-  { code: 'NCL', name: 'Northern Coalfields HQ', location: 'Singrauli, Madhya Pradesh', coordinates: [24.1997, 82.6644], desc: '100% mechanized opencast mining complexes.' },
-  { code: 'BCCL', name: 'Bharat Coking Coal HQ', location: 'Dhanbad, Jharkhand', coordinates: [23.7957, 86.4304], desc: 'Jharia prime coking coal extraction & coal washeries.' },
-  { code: 'CCL', name: 'Central Coalfields HQ', location: 'Ranchi, Jharkhand', coordinates: [23.3683, 85.3262], desc: 'Karanpura, Bokaro & Ramgarh command fields.' },
-  { code: 'WCL', name: 'Western Coalfields HQ', location: 'Nagpur, Maharashtra', coordinates: [21.1458, 79.0882], desc: 'Wardha, Umrer & Pench coal extraction belts.' },
-  { code: 'ECL', name: 'Eastern Coalfields HQ', location: 'Sanctoria, West Bengal', coordinates: [23.6841, 86.8529], desc: 'Raniganj historical underground & opencast basin.' },
-  { code: 'J&K EXP', name: 'Kalakot Coalfield & Exploration Sector', location: 'Rajouri, Jammu & Kashmir', coordinates: [33.2200, 74.4100], desc: 'Sub-Himalayan tertiary anthracite/semi-bituminous exploration sector.' },
-];
 
 export default function RiskMap() {
   const navigate = useNavigate();
   const [state, setState] = useState({ status: 'loading', mines: [] });
-  const [showHqs, setShowHqs] = useState(true);
+  const [showLabels, setShowLabels] = useState(true);
   const [selectedFilter, setSelectedFilter] = useState('ALL');
   const [baseMapKey, setBaseMapKey] = useState('osm');
 
@@ -105,10 +86,20 @@ export default function RiskMap() {
         riskService.getRiskScores().catch(() => []),
       ]);
       const safeMines = Array.isArray(mines) && mines.length > 0 ? mines : mockMines;
-      const merged = safeMines.map((m) => ({
-        ...m,
-        risk: (riskScores || []).find((r) => r.mineId === m.id) || null,
-      }));
+      const merged = safeMines.map((m) => {
+        let coords = m.coordinates;
+        if (typeof coords === 'string') {
+          try { coords = JSON.parse(coords); } catch { coords = null; }
+        }
+        if ((!coords || !Array.isArray(coords)) && m.latitude != null && m.longitude != null) {
+          coords = [m.latitude, m.longitude];
+        }
+        return {
+          ...m,
+          coordinates: coords,
+          risk: (riskScores || []).find((r) => r.mineId === m.id) || null,
+        };
+      });
       setState({ status: 'success', mines: merged });
     } catch {
       setState({ status: 'success', mines: mockMines });
@@ -124,11 +115,11 @@ export default function RiskMap() {
     if (!mapContainerRef.current) return;
     if (mapInstanceRef.current) return;
 
-    // Center over India with full worldwide navigation
+    // Center over Central India coalfields with full worldwide navigation
     const map = L.map(mapContainerRef.current, {
-      center: [22.8, 80.5],
-      zoom: 5,
-      minZoom: 2,
+      center: [22.8, 82.5],
+      zoom: 6,
+      minZoom: 3,
       maxZoom: 19,
       worldCopyJump: true,
       zoomControl: true,
@@ -217,7 +208,8 @@ export default function RiskMap() {
     }
   }, [baseMapKey]);
 
-  // Update Leaflet markers when state.mines, selectedFilter, or showHqs change
+  // Update Leaflet markers when state.mines, selectedFilter, or showLabels change
+  // Synchronized markers: Only the dot pin is clickable; labels are non-interactive tooltips
   useEffect(() => {
     const map = mapInstanceRef.current;
     const markersLayer = markersLayerRef.current;
@@ -225,48 +217,75 @@ export default function RiskMap() {
 
     markersLayer.clearLayers();
 
-    // 1. Mine Markers
     const displayedMines = selectedFilter === 'ALL'
       ? state.mines
       : state.mines.filter((m) => (m.risk?.level || m.riskLevel) === selectedFilter);
 
     displayedMines.forEach((mine) => {
-      if (!mine.coordinates || mine.coordinates.length !== 2) return;
+      if (!mine.coordinates || !Array.isArray(mine.coordinates) || mine.coordinates.length !== 2) return;
       const level = mine.risk?.level || mine.riskLevel || 'MEDIUM';
       const color = RISK_COLORS[level] || RISK_COLORS.MEDIUM;
 
+      // 1. Only the dot marker is interactive/clickable
       const marker = L.marker(mine.coordinates, {
         icon: riskIcon(level),
+        keyboard: true,
+        title: `${mine.name} (${mine.subsidiary || 'CIL'})`,
       });
 
+      // 2. Synchronized mine label: anchored directly to the dot, completely non-interactive
+      if (showLabels) {
+        marker.bindTooltip(
+          `<div style="display:flex;align-items:center;gap:5px;font-family:system-ui,-apple-system,sans-serif;pointer-events:none;user-select:none;">
+             <span style="background:#0F172A;color:#F8FAFC;font-size:9px;font-weight:800;padding:1px 5px;border-radius:3px;letter-spacing:0.5px;">${mine.subsidiary || 'CIL'}</span>
+             <span style="font-size:11px;font-weight:700;color:#0F172A;letter-spacing:-0.2px;">${mine.name}</span>
+           </div>`,
+          {
+            permanent: true,
+            direction: 'top',
+            offset: [0, -14],
+            interactive: false, // Absolutely NOT clickable! Clicks pass through to the dot!
+            className: 'mine-synced-tooltip',
+          }
+        );
+      }
+
+      // 3. Rich popup opened ONLY by clicking the dot
       const popupHtml = `
-        <div style="min-width:210px;font-family:inherit;font-size:12px;line-height:1.45;">
-          <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #E2E8F0;padding-bottom:6px;margin-bottom:8px;">
-            <strong style="font-size:13px;color:#0F172A;">${mine.name}</strong>
-            <span style="background:${color};color:white;padding:2px 8px;border-radius:9999px;font-size:10px;font-weight:700;">
+        <div style="min-width:230px;font-family:system-ui,-apple-system,sans-serif;font-size:12px;line-height:1.45;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:1px solid #E2E8F0;padding-bottom:8px;margin-bottom:8px;gap:8px;">
+            <div>
+              <div style="font-size:9px;font-weight:800;color:#0284C7;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:2px;">
+                ${mine.subsidiary || 'CIL'} · ${mine.code || 'MINE-SITE'}
+              </div>
+              <strong style="font-size:13px;color:#0F172A;line-height:1.25;display:block;">${mine.name}</strong>
+            </div>
+            <span style="background:${color};color:white;padding:2px 8px;border-radius:9999px;font-size:10px;font-weight:700;white-space:nowrap;">
               ${level}
             </span>
           </div>
-          <div style="color:#64748B;margin-bottom:4px;display:flex;align-items:center;gap:4px;">
-            📍 ${mine.location}
+          <div style="color:#475569;margin-bottom:5px;display:flex;align-items:center;gap:4px;font-size:11px;">
+            📍 <span>${mine.location || `${mine.district}, ${mine.state}`}</span>
           </div>
-          <div style="color:#334155;margin-bottom:8px;">
+          <div style="color:#334155;margin-bottom:8px;font-size:11px;">
             Subsidiary: <strong style="color:#0F172A;">${mine.subsidiary || 'Coal India Limited'}</strong>
+            ${mine.state ? ` (${mine.state})` : ''}
           </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;background:#F8FAFC;padding:7px;border-radius:6px;font-size:11px;margin-bottom:10px;">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;background:#F8FAFC;padding:8px;border-radius:6px;font-size:11px;margin-bottom:10px;border:1px solid #E2E8F0;">
             <div>Risk Score: <strong>${mine.riskScore || 0}/100</strong></div>
             <div>Compliance: <strong style="color:#16A34A;">${mine.complianceRate || 95}%</strong></div>
             <div>Open Flags: <strong>${mine.openFlags || 0}</strong></div>
             <div>Actions: <strong>${mine.openCorrectiveActions || 0}</strong></div>
+            ${mine.productionMT ? `<div style="grid-column:span 2;color:#64748B;font-size:10px;border-top:1px solid #E2E8F0;padding-top:4px;">Annual Output: <strong style="color:#0F172A;">${mine.productionMT} MTPA</strong></div>` : ''}
           </div>
           <button
             class="view-mine-btn"
             data-mine-id="${mine.id}"
-            style="width:100%;background:#081B33;color:white;border:none;padding:6px 12px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;transition:background 0.2s;"
+            style="width:100%;background:#081B33;color:white;border:none;padding:7px 12px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;transition:background 0.2s;"
             onmouseover="this.style.background='#1B4965'"
             onmouseout="this.style.background='#081B33'"
           >
-            View Mine Dossier
+            View Mine Dossier →
           </button>
         </div>
       `;
@@ -274,31 +293,7 @@ export default function RiskMap() {
       marker.bindPopup(popupHtml, { maxWidth: 280 });
       markersLayer.addLayer(marker);
     });
-
-    // 2. CIL Headquarters & Exploration Basins
-    if (showHqs) {
-      CIL_KEY_LOCATIONS.forEach((hq) => {
-        const hqMarker = L.marker(hq.coordinates, {
-          icon: hqIcon(hq.code),
-        });
-
-        const hqPopupHtml = `
-          <div style="min-width:200px;font-family:inherit;font-size:12px;line-height:1.45;">
-            <div style="font-size:13px;font-weight:700;color:#0F172A;margin-bottom:4px;">
-              🏢 ${hq.name}
-            </div>
-            <div style="color:#64748B;font-weight:500;margin-bottom:6px;">${hq.location}</div>
-            <div style="color:#334155;font-size:11px;padding-top:6px;border-top:1px solid #E2E8F0;">
-              ${hq.desc}
-            </div>
-          </div>
-        `;
-
-        hqMarker.bindPopup(hqPopupHtml, { maxWidth: 260 });
-        markersLayer.addLayer(hqMarker);
-      });
-    }
-  }, [state.mines, selectedFilter, showHqs]);
+  }, [state.mines, selectedFilter, showLabels]);
 
   function handleResetView() {
     if (mapInstanceRef.current) {
@@ -373,11 +368,11 @@ export default function RiskMap() {
             <label className="flex items-center gap-2 cursor-pointer select-none">
               <input
                 type="checkbox"
-                checked={showHqs}
-                onChange={(e) => setShowHqs(e.target.checked)}
+                checked={showLabels}
+                onChange={(e) => setShowLabels(e.target.checked)}
                 className="accent-brand-600 rounded cursor-pointer h-3.5 w-3.5"
               />
-              <span className="font-medium text-ink-800">CIL HQs</span>
+              <span className="font-medium text-ink-800">Mine Labels</span>
             </label>
 
             <span className="flex items-center gap-1.5 text-ink-500">
@@ -398,6 +393,25 @@ export default function RiskMap() {
 
       {/* Pure Leaflet Map Container */}
       <div className="overflow-hidden rounded-xl border border-border shadow-card relative bg-surface-canvas">
+        <style>{`
+          .mine-synced-tooltip {
+            background: rgba(255, 255, 255, 0.94) !important;
+            backdrop-filter: blur(4px) !important;
+            border: 1px solid rgba(15, 23, 42, 0.18) !important;
+            border-radius: 6px !important;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12) !important;
+            padding: 3px 8px !important;
+            pointer-events: none !important;
+            cursor: default !important;
+          }
+          .mine-synced-tooltip::before {
+            border-top-color: rgba(255, 255, 255, 0.94) !important;
+          }
+          .custom-mine-pin {
+            background: transparent !important;
+            border: none !important;
+          }
+        `}</style>
         <div
           ref={mapContainerRef}
           style={{ height: '580px', width: '100%', zIndex: 1 }}

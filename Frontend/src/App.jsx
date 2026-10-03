@@ -2,6 +2,8 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import AuthLayout from './layouts/AuthLayout.jsx';
 import DashboardLayout from './layouts/DashboardLayout.jsx';
 import ProtectedRoute from './components/common/ProtectedRoute.jsx';
+import { useAuth } from './hooks/useAuth.js';
+import { ROLES, hasAdminAccess } from './utils/roles.js';
 import Login from './pages/auth/Login.jsx';
 import Dashboard from './pages/dashboard/Dashboard.jsx';
 import FlagsList from './pages/flags/FlagsList.jsx';
@@ -58,7 +60,14 @@ export default function App() {
           </ProtectedRoute>
         }
       >
-        <Route path="/dashboard" element={<Dashboard />} />
+        <Route
+          path="/dashboard"
+          element={
+            <ProtectedRoute roles={[ROLES.CORPORATE_ADMIN, ROLES.MINE_MANAGER]}>
+              <Dashboard />
+            </ProtectedRoute>
+          }
+        />
 
         <Route path="/flags" element={<FlagsList />} />
         <Route path="/flags/new" element={<NewFlag />} />
@@ -104,8 +113,16 @@ export default function App() {
         <Route path="/platform" element={<PlatformOverview />} />
       </Route>
 
-      <Route path="/" element={<Navigate to="/dashboard" replace />} />
+      <Route path="/" element={<RoleBasedHomeRedirect />} />
       <Route path="*" element={<NotFound />} />
     </Routes>
   );
+}
+
+function RoleBasedHomeRedirect() {
+  const { isAuthenticated, user } = useAuth();
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  if (user?.role === ROLES.CONTRACTOR) return <Navigate to="/contractor/dashboard" replace />;
+  if (hasAdminAccess(user) || user?.role === ROLES.MINE_MANAGER) return <Navigate to="/dashboard" replace />;
+  return <Navigate to="/mines" replace />;
 }

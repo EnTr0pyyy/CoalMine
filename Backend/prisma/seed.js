@@ -13,6 +13,9 @@ async function seed() {
   // 1. Seed Mines
   console.log(`Seeding ${mock.mockMines.length} mines...`);
   for (const m of mock.mockMines) {
+    const lat = m.latitude ?? (Array.isArray(m.coordinates) ? m.coordinates[0] : null);
+    const lng = m.longitude ?? (Array.isArray(m.coordinates) ? m.coordinates[1] : null);
+
     await prisma.mine.upsert({
       where: { id: m.id },
       update: {
@@ -22,13 +25,15 @@ async function seed() {
         subsidiary: m.subsidiary || 'CIL',
         state: m.state || 'Jharkhand',
         district: m.district || 'Dhanbad',
-        operationalStatus: m.status || 'ACTIVE',
+        latitude: lat,
+        longitude: lng,
+        operationalStatus: m.operationalStatus || m.status || 'ACTIVE',
         complianceRate: m.complianceRate || 0,
         riskScore: m.riskScore || 0,
         riskLevel: m.riskLevel || 'LOW',
         openFlags: m.openFlags || 0,
         openCorrectiveActions: m.openCorrectiveActions || 0,
-        coordinates: m.coordinates || [23.7957, 86.4304],
+        coordinates: m.coordinates || [lat, lng],
       },
       create: {
         id: m.id,
@@ -38,13 +43,15 @@ async function seed() {
         subsidiary: m.subsidiary || 'CIL',
         state: m.state || 'Jharkhand',
         district: m.district || 'Dhanbad',
-        operationalStatus: m.status || 'ACTIVE',
+        latitude: lat,
+        longitude: lng,
+        operationalStatus: m.operationalStatus || m.status || 'ACTIVE',
         complianceRate: m.complianceRate || 0,
         riskScore: m.riskScore || 0,
         riskLevel: m.riskLevel || 'LOW',
         openFlags: m.openFlags || 0,
         openCorrectiveActions: m.openCorrectiveActions || 0,
-        coordinates: m.coordinates || [23.7957, 86.4304],
+        coordinates: m.coordinates || [lat, lng],
       },
     });
   }

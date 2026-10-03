@@ -8,7 +8,7 @@ import { departmentLabel } from '../../utils/departments.js';
 export default function Sidebar({ isOpen, onClose }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const sections = navForRole(user?.role);
+  const sections = navForRole(user?.role, user);
 
   function handleLogout() {
     logout();

@@ -28,13 +28,14 @@ import {
   MessageSquare
 } from 'lucide-react';
 import { ROLES } from './roles.js';
+import { hasAdminAccess } from './roles.js';
 
 // `roles: null` means "visible to every authenticated role".
 export const NAV_SECTIONS = [
   {
     title: 'Statutory Core & Gazette',
     items: [
-      { label: 'Executive Dashboard', path: '/dashboard', icon: LayoutDashboard, roles: null },
+      { label: 'Executive Dashboard', path: '/dashboard', icon: LayoutDashboard, roles: [ROLES.CORPORATE_ADMIN, ROLES.MINE_MANAGER] },
       { label: 'Official Gazette & Notices', path: '/notices', icon: Megaphone, roles: null },
       { label: 'Automated Reports', path: '/reports', icon: FileBarChart, roles: null },
       { label: 'Word Cloud & Topics', path: '/topics', icon: Cloud, roles: null },
@@ -114,11 +115,15 @@ export const CONTRACTOR_NAV_SECTIONS = [
   },
 ];
 
-export function navForRole(role) {
+export function navForRole(role, user = null) {
   if (role === ROLES.CONTRACTOR) return CONTRACTOR_NAV_SECTIONS;
 
   return NAV_SECTIONS.map((section) => ({
     ...section,
-    items: section.items.filter((item) => !item.roles || item.roles.includes(role)),
+    items: section.items.filter((item) => {
+      if (!item.roles) return true;
+      if (user && hasAdminAccess(user)) return true;
+      return item.roles.includes(role);
+    }),
   })).filter((section) => section.items.length > 0);
 }

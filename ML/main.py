@@ -709,6 +709,21 @@ async def export_report_docx(req: ReportExportRequest):
         logger.error(f"DOCX Export error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/reports/export/xlsx")
+async def export_report_xlsx(req: ReportExportRequest):
+    """Generates a structured, styled Excel workbook (.xlsx) from report tables."""
+    try:
+        xlsx_buffer = report_engine.export_excel(req.report_data)
+        return StreamingResponse(
+            xlsx_buffer,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename=Ledger_{req.report_data.get('subsidiary', 'CIL')}.xlsx"}
+        )
+    except Exception as e:
+        logger.error(f"XLSX Export error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/reports/templates")
 async def get_report_templates():
     return {

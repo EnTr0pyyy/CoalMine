@@ -13,20 +13,24 @@ export const reportsService = {
     }
   },
 
-  generateAutomatedReport: async ({ templateType, subsidiary, period, metrics }) => {
-    return apiClient.post('/reports/generate', { templateType, subsidiary, period, metrics });
+  generateAutomatedReport: async ({ templateType, subsidiary, period, metrics, selectedDocumentIds }) => {
+    return apiClient.post('/reports/generate', { templateType, subsidiary, period, metrics, selectedDocumentIds });
   },
 
   generateReport: async (payload) => {
     return apiClient.post('/reports', payload);
   },
 
-  analyzeAndGenerateFromUpload: async (file, { templateType, subsidiary, period } = {}) => {
+  analyzeAndGenerateFromUpload: async (file, { templateType, subsidiary, period, saveToDatabase, selectedDocumentIds } = {}) => {
     const formData = new FormData();
     formData.append('file', file);
     if (templateType) formData.append('templateType', templateType);
     if (subsidiary) formData.append('subsidiary', subsidiary);
     if (period) formData.append('period', period);
+    if (saveToDatabase !== undefined) formData.append('saveToDatabase', String(saveToDatabase));
+    if (selectedDocumentIds && selectedDocumentIds.length > 0) {
+      formData.append('selectedDocumentIds', JSON.stringify(selectedDocumentIds));
+    }
     return apiClient.postForm('/reports/analyze-upload', formData);
   },
 
@@ -61,6 +65,24 @@ export const reportsService = {
     const a = document.createElement('a');
     a.href = url;
     a.download = `Report_${reportData.subsidiary || 'CIL'}_${reportData.period || ''}.docx`
+      .replace(/[\s/\\:*?"<>|]/g, '_');
+    a.click();
+    URL.revokeObjectURL(url);
+  },
+
+  // ── Structured Excel (.xlsx) Export (openpyxl via ML service) ──
+  exportReportXlsx: async (reportData) => {
+    const res = await fetch(`${ML_BASE}/api/reports/export/xlsx`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ report_data: reportData }),
+    });
+    if (!res.ok) throw new Error('Excel export failed');
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Ledger_${reportData.subsidiary || 'CIL'}_${reportData.period || ''}.xlsx`
       .replace(/[\s/\\:*?"<>|]/g, '_');
     a.click();
     URL.revokeObjectURL(url);

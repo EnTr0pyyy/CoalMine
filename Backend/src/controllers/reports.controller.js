@@ -152,6 +152,12 @@ const generateReport = async (req, res) => {
         'Accelerate commissioning of 2 Rapid Loading Systems (RLS) to lower siding turnaround time below 3.5 hours.',
         'Finalize Stage-II forestry clearances for ongoing lease blocks with state forest authorities.'
       ],
+      detailedAnalysis: `${subsidiary} operations during ${period} demonstrated sustained momentum in opencast coal production, led by high-capacity dragline and shovel-dumper fleets across principal mine sections. Underground output, though below target, reflects ongoing panel reorientation in thick-seam Bord & Pillar zones. OBR (Overburden Removal) pacing at 94.4% of target ensures adequate bench exposure for next-quarter ramp-up. First Mile Connectivity (FMC) through silo and rapid loading system integration reduced road-to-rail transit time, directly lowering demurrage charges. CMPDI exploratory drilling exceeded schedule, yielding updated seam correlation data for future mine planning.`,
+      complianceObservations: [
+        'DGMS statutory safety compliance verified for opencast highwall slopes and haul road standards.',
+        'Stage-II forest clearance applications advanced for two new lease blocks pending state forest committee approval.',
+        'Environmental monitoring of air quality (SPM, RSPM) and water discharge within CPCB permissible limits.'
+      ],
       generatedAt: new Date().toISOString()
     };
 

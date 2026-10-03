@@ -1,4 +1,5 @@
 import io
+import re
 import time
 import json
 import httpx
@@ -61,37 +62,91 @@ class ReportEngine:
         }
 
     def _build_prompt(self, template_type: str, subsidiary: str, period: str, data: Dict[str, Any]) -> str:
-        return f"""You are a Senior Technical Mining Advisor for CMPDI, Coal India Limited (CIL), and the Ministry of Coal.
-Prepare an executive analytical briefing for the following parameters:
+        metrics_str = json.dumps(data.get('metrics', {}), indent=2) if data.get('metrics') else "Not provided"
+
+        # Include actual extracted document text if available
+        doc_text = data.get('extracted_text', '') or data.get('document_text', '') or ''
+        doc_section = ""
+        if doc_text and len(doc_text.strip()) > 50:
+            # Truncate to avoid token overflow for small models
+            doc_section = f"\n\nEXTRACTED DOCUMENT CONTENT (summarize THIS, do NOT ignore):\n---\n{doc_text[:3000]}\n---"
+
+        filename = data.get('filename', '')
+        filename_section = f"\n- Source File: {filename}" if filename else ""
+
+        return f"""You are a Senior Technical Mining Analyst at CMPDI, Coal India Limited.
+Analyze the following and produce a structured JSON report:
+
 - Report Type: {template_type}
 - Subsidiary: {subsidiary}
-- Time Period: {period}
-- Key Metrics Available: {json.dumps(data.get('metrics', {}))}
+- Period: {period}{filename_section}
+- Metrics: {metrics_str}{doc_section}
 
-Return a structured JSON with:
-1. "summary": Executive summary highlighting target vs achievement, OBR, offtake, and constraints.
-2. "highlights": List of 3-5 bulleted analytical observations.
-3. "recommendations": List of 3 strategic recommendations for CIL leadership.
-Only return valid JSON."""
+Return ONLY valid JSON with exactly these keys:
+{{
+  "summary": "2-3 sentence executive summary based on the document content above",
+  "highlights": ["bullet 1", "bullet 2", "bullet 3", "bullet 4"],
+  "recommendations": ["recommendation 1", "recommendation 2", "recommendation 3"]
+}}
+
+Important: Base your summary on the actual document content provided above. If metrics or document text is available, reference specific numbers and facts."""
+
 
     async def _call_gemma_llm(self, prompt: str) -> Optional[Dict[str, Any]]:
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                res = await client.post(
-                    f"{self.ollama_url}/api/generate",
-                    json={
-                        "model": self.chat_model,
-                        "prompt": prompt,
-                        "stream": False,
-                        "format": "json"
-                    }
-                )
-                if res.status_code == 200:
-                    text_resp = res.json().get("response", "{}")
-                    return json.loads(text_resp)
-        except Exception as e:
-            logger.info(f"Local Ollama gemma3:1b call completed or fell back: {e}")
+        """
+        Calls local Ollama LLM. Tries configured model first, then falls back to qwen2.5:3b.
+        Timeout raised to 90s for CPU-only laptops (i5 12th gen).
+        """
+        models_to_try = [self.chat_model]
+        if "qwen2.5:3b" not in models_to_try:
+            models_to_try.append("qwen2.5:3b")
+
+        for model in models_to_try:
+            try:
+                async with httpx.AsyncClient(timeout=90.0) as client:
+                    res = await client.post(
+                        f"{self.ollama_url}/api/generate",
+                        json={
+                            "model": model,
+                            "prompt": prompt,
+                            "stream": False,
+                            "format": "json",
+                            "options": {
+                                "temperature": 0.3,
+                                "num_predict": 600,
+                            }
+                        }
+                    )
+                    if res.status_code == 200:
+                        response_text = res.json().get("response", "{}").strip()
+                        if not response_text or response_text == "{}":
+                            logger.warning(f"Model {model} returned empty response")
+                            continue
+                        try:
+                            parsed = json.loads(response_text)
+                            if parsed.get("summary") or parsed.get("highlights"):
+                                logger.info(f"LLM response from {model}: OK")
+                                return parsed
+                        except json.JSONDecodeError:
+                            # Try to extract JSON from raw text
+                            match = re.search(r'\{.*\}', response_text, re.DOTALL)
+                            if match:
+                                try:
+                                    return json.loads(match.group(0))
+                                except Exception:
+                                    pass
+                            logger.warning(f"Model {model} did not return valid JSON")
+                    else:
+                        logger.warning(f"Ollama {model} HTTP {res.status_code}: {res.text[:100]}")
+            except httpx.ConnectError:
+                logger.error(f"Cannot connect to Ollama at {self.ollama_url}. Is Ollama running?")
+                break
+            except httpx.TimeoutException:
+                logger.warning(f"Ollama {model} timed out after 90s, trying next model...")
+            except Exception as e:
+                logger.warning(f"Ollama {model} error: {e}")
         return None
+
 
     def _generate_fallback_narrative(self, template_type: str, subsidiary: str, period: str, data: Dict[str, Any]) -> Dict[str, Any]:
         metrics = data.get("metrics", {})
@@ -100,14 +155,35 @@ Only return valid JSON."""
         ach_pct = round((prod / target) * 100, 1) if target else 92.0
         obr = metrics.get("obr_mcum", 42.5)
 
-        return {
-            "summary": f"During {period}, {subsidiary} recorded a cumulative coal production of {prod} MT against the Ministry target of {target} MT ({ach_pct}% achievement). Overburden removal (OBR) achieved {obr} M.Cu.m, sustaining high bench readiness for opencast operations. Rake availability and FMC (First Mile Connectivity) debottlenecking contributed to a steady offtake of 94.2% towards pithead thermal power plants.",
-            "highlights": [
+        # Use actual document text if available
+        doc_text = data.get("extracted_text", "") or data.get("document_text", "") or ""
+        filename = data.get("filename", "")
+
+        if doc_text and len(doc_text.strip()) > 100:
+            # Build summary from actual document content
+            preview = doc_text.strip()[:500].replace("\n", " ").strip()
+            word_count = len(doc_text.split())
+            summary = f'Analysis of uploaded document "{filename}" ({word_count} words extracted). Document content: {preview}...'
+
+            highlights = [
+                f'Source file "{filename}" processed via Tesseract OCR with auto-language detection.',
+                f"Extracted {word_count} words of content from the document.",
+                f"Document text preview: \"{preview[:150]}...\"",
+                "AI LLM summarization unavailable — please ensure Ollama is running for intelligent analysis."
+            ]
+        else:
+            summary = f"During {period}, {subsidiary} recorded a cumulative coal production of {prod} MT against the Ministry target of {target} MT ({ach_pct}% achievement). Overburden removal (OBR) achieved {obr} M.Cu.m, sustaining high bench readiness for opencast operations."
+
+            highlights = [
                 f"Production achievement stood at {ach_pct}% with heavy reliance on mega-opencast blocks.",
                 f"OBR advanced by 6.8% YoY, ensuring exposed coal reserve buffer for monsoon mitigation.",
                 "First Mile Connectivity silos achieved 82% direct rail loading, reducing road transport dust emissions.",
                 "High-grade geological borehole exploration by CMPDI validated 142 MT of G-7 to G-9 reserves."
-            ],
+            ]
+
+        return {
+            "summary": summary,
+            "highlights": highlights,
             "recommendations": [
                 "Accelerate equipment maintenance cycles for 42 Cu.m shovels and 240T dumpers to sustain stripping ratio.",
                 "Commission 2 additional Rapid Loading Systems (RLS) to minimize siding turnaround time below 3.2 hours.",

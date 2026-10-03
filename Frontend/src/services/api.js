@@ -72,6 +72,12 @@ async function request(path, { method = 'GET', body, headers, signal } = {}) {
   const payload = isJson ? await response.json() : await response.text();
 
   if (!response.ok) {
+    if (response.status === 401 && token) {
+      console.warn('[apiClient] 401 Unauthorized received. Clearing expired session token.');
+      localStorage.removeItem('minegov_auth_token');
+      localStorage.removeItem('minegov_auth_user');
+      window.dispatchEvent(new Event('storage'));
+    }
     throw new ApiError(payload?.message || response.statusText, response.status, payload);
   }
 
@@ -99,6 +105,12 @@ async function requestForm(path, formData, { method = 'POST', headers, signal } 
   const payload = isJson ? await response.json() : await response.text();
 
   if (!response.ok) {
+    if (response.status === 401 && token) {
+      console.warn('[apiClient] 401 Unauthorized received. Clearing expired session token.');
+      localStorage.removeItem('minegov_auth_token');
+      localStorage.removeItem('minegov_auth_user');
+      window.dispatchEvent(new Event('storage'));
+    }
     throw new ApiError(payload?.message || response.statusText, response.status, payload);
   }
 

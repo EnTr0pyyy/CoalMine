@@ -5,7 +5,7 @@ import json
 import time
 import hashlib
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from PIL import Image
 import pymupdf
 import torch
@@ -15,7 +15,7 @@ from config import DONUT_MODEL_NAME, MODELS_CACHE_DIR, EXTRACT_CACHE_DIR
 logger = logging.getLogger("pdf_processor")
 logger.setLevel(logging.INFO)
 
-def _load_tesseract() -> tuple[Any, bool]:
+def _load_tesseract() -> Tuple[Any, bool]:
     try:
         import pytesseract
     except ImportError:
@@ -61,18 +61,24 @@ else:
 _PROCESSOR: Optional[DonutProcessor] = None
 _MODEL: Optional[VisionEncoderDecoderModel] = None
 _DEVICE: str = "cpu"
+_DONUT_AVAILABLE: Optional[bool] = None
 _MEMORY_CACHE: Dict[str, Dict[str, Any]] = {}
 
 os.makedirs(MODELS_CACHE_DIR, exist_ok=True)
 os.makedirs(EXTRACT_CACHE_DIR, exist_ok=True)
 
 
-def get_donut_pipeline():
+def get_donut_pipeline() -> Tuple[Optional[DonutProcessor], Optional[VisionEncoderDecoderModel], str]:
     """
     Singleton loader for DonutProcessor and VisionEncoderDecoderModel.
     Cached locally in MODELS_CACHE_DIR so subsequent startups run fully offline.
+    Uses token=False to prevent invalid/expired system access token 401 rejections.
+    Gracefully returns (None, None, 'cpu') if model loading fails.
     """
-    global _PROCESSOR, _MODEL, _DEVICE
+    global _PROCESSOR, _MODEL, _DEVICE, _DONUT_AVAILABLE
+
+    if _DONUT_AVAILABLE is False:
+        return None, None, _DEVICE
 
     if _PROCESSOR is not None and _MODEL is not None:
         return _PROCESSOR, _MODEL, _DEVICE
@@ -93,54 +99,63 @@ def get_donut_pipeline():
             _MODEL = VisionEncoderDecoderModel.from_pretrained(model_dir, local_files_only=True)
         else:
             logger.info(f"Downloading/loading Donut model: {DONUT_MODEL_NAME} (cache: {MODELS_CACHE_DIR})")
-            _PROCESSOR = DonutProcessor.from_pretrained(DONUT_MODEL_NAME, cache_dir=MODELS_CACHE_DIR)
-            _MODEL = VisionEncoderDecoderModel.from_pretrained(DONUT_MODEL_NAME, cache_dir=MODELS_CACHE_DIR)
+            # Explicitly set token=False to prevent invalid Bearer token / 401 Access Denied errors
+            _PROCESSOR = DonutProcessor.from_pretrained(DONUT_MODEL_NAME, cache_dir=MODELS_CACHE_DIR, token=False)
+            _MODEL = VisionEncoderDecoderModel.from_pretrained(DONUT_MODEL_NAME, cache_dir=MODELS_CACHE_DIR, token=False)
             
             logger.info(f"Saving offline snapshot to {model_dir}...")
             _PROCESSOR.save_pretrained(model_dir)
             _MODEL.save_pretrained(model_dir)
 
+        _MODEL.to(_DEVICE)
+        _MODEL.eval()
+        _DONUT_AVAILABLE = True
+        logger.info(f"Donut model loaded successfully in {time.time() - start_time:.2f}s on {_DEVICE}.")
+        return _PROCESSOR, _MODEL, _DEVICE
+
     except Exception as e:
-        logger.error(f"Error loading Donut model: {e}")
-        if is_local:
-            logger.info("Retrying with remote hub download...")
-            _PROCESSOR = DonutProcessor.from_pretrained(DONUT_MODEL_NAME, cache_dir=MODELS_CACHE_DIR)
-            _MODEL = VisionEncoderDecoderModel.from_pretrained(DONUT_MODEL_NAME, cache_dir=MODELS_CACHE_DIR)
-            _PROCESSOR.save_pretrained(model_dir)
-            _MODEL.save_pretrained(model_dir)
-        else:
-            raise e
-
-    _MODEL.to(_DEVICE)
-    _MODEL.eval()
-    logger.info(f"Donut model loaded successfully in {time.time() - start_time:.2f}s on {_DEVICE}.")
-    return _PROCESSOR, _MODEL, _DEVICE
+        logger.warning(f"Donut model loading unavailable or failed: {e}. OCR-based field extraction will be used as fallback.")
+        _DONUT_AVAILABLE = False
+        return None, None, _DEVICE
 
 
-def render_document_page(file_bytes: bytes, filename: str, page_num: int = 0):
+def render_document_page(file_bytes: bytes, filename: str, page_num: int = 0) -> Tuple[Image.Image, int]:
     """
     Renders the specified page of a PDF or image into a PIL Image.
     Returns (PIL Image, total_pages).
+    Safely handles non-PDF files, images, and corrupted documents.
     """
     ext = os.path.splitext(filename)[1].lower()
     
     if ext in [".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff"]:
-        image = Image.open(io.BytesIO(file_bytes)).convert("RGB")
-        return image, 1
+        try:
+            image = Image.open(io.BytesIO(file_bytes)).convert("RGB")
+            return image, 1
+        except Exception as e:
+            logger.error(f"Failed to open image {filename}: {e}")
+            return Image.new("RGB", (800, 1000), color=(255, 255, 255)), 1
 
-    doc = pymupdf.open(stream=file_bytes, filetype="pdf")
-    total_pages = len(doc)
-    if total_pages == 0:
-        doc.close()
-        raise ValueError("PDF document contains no pages")
+    doc = None
+    try:
+        doc = pymupdf.open(stream=file_bytes, filetype="pdf")
+        total_pages = len(doc)
+        if total_pages == 0:
+            return Image.new("RGB", (800, 1000), color=(255, 255, 255)), 1
 
-    page_num = _normalize_page_num(page_num, total_pages)
-
-    page = doc[page_num]
-    pix = page.get_pixmap(dpi=150)
-    image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-    doc.close()
-    return image, total_pages
+        page_num = _normalize_page_num(page_num, total_pages)
+        page = doc[page_num]
+        pix = page.get_pixmap(dpi=150)
+        image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        return image, total_pages
+    except Exception as e:
+        logger.warning(f"Error opening PDF {filename} with PyMuPDF: {e}. Attempting fallback...")
+        return Image.new("RGB", (800, 1000), color=(255, 255, 255)), 1
+    finally:
+        if doc is not None:
+            try:
+                doc.close()
+            except Exception:
+                pass
 
 
 def _normalize_page_num(page_num: int, total_pages: int) -> int:
@@ -192,6 +207,58 @@ def clean_extracted_value(val: str) -> str:
     return cleaned
 
 
+def _extract_fields_via_ocr_regex(text: str, fields: list) -> Dict[str, str]:
+    """
+    Robust fallback: extracts common mining and statutory fields from OCR text
+    using regex patterns when Donut VQA model is offline or unavailable.
+    """
+    results = {}
+    lines = [line.strip() for line in text.split("\n") if line.strip()]
+
+    # Mapping of field keywords to regex patterns
+    patterns = {
+        "lease_id": r"(?:lease\s*(?:id|no|number|code)|ml\s*no)[\s:\-\.]*([A-Za-z0-9\/\-]+)",
+        "mine_name": r"(?:mine\s*name|colliery|block\s*name)[\s:\-\.]*([A-Za-z0-9\s\-]+?)(?:\n|,|$)",
+        "subsidiary": r"\b(ECL|BCCL|CCL|WCL|SECL|MCL|NCL|CMPDI|CIL)\b",
+        "production": r"(?:production|raw\s*coal|coal\s*prod)[\s:\-\.]*([\d\.,]+\s*(?:MT|tonnes|te|lakh)?)",
+        "target": r"(?:target|planned)[\s:\-\.]*([\d\.,]+\s*(?:MT|tonnes|te)?)",
+        "obr": r"(?:obr|overburden)[\s:\-\.]*([\d\.,]+\s*(?:M\.?Cu\.?m|mcum)?)",
+        "area": r"(?:area|lease\s*area)[\s:\-\.]*([\d\.,]+\s*(?:ha|hectares|sq\s*km)?)",
+        "date": r"(?:date|period|dated)[\s:\-\.]*(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}|\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[\s,]+\d{4}\b)",
+        "reserves": r"(?:proved\s*reserves|geological\s*reserves)[\s:\-\.]*([\d\.,]+\s*MT)",
+        "seam": r"(?:seam|coal\s*seam)[\s:\-\.]*([A-Za-z0-9\-\s]+)",
+    }
+
+    for field in fields:
+        field_clean = field.strip()
+        field_lower = field_clean.lower().replace(" ", "_")
+        matched = False
+
+        # 1. Try matched patterns
+        for key, pattern in patterns.items():
+            if key in field_lower:
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    results[field_clean] = match.group(1).strip()
+                    matched = True
+                    break
+
+        if matched:
+            continue
+
+        # 2. Key-value line search: "Field Name: <value>"
+        field_pattern = re.escape(field_clean).replace(r"\_", r"[\s_]")
+        kv_match = re.search(rf"{field_pattern}[\s:\-=]+([^\n\r,;]{{1,80}})", text, re.IGNORECASE)
+        if kv_match:
+            results[field_clean] = kv_match.group(1).strip()
+            continue
+
+        # 3. Default empty string so caller never gets KeyError
+        results[field_clean] = ""
+
+    return results
+
+
 def extract_fields_from_document(
     file_bytes: bytes,
     filename: str,
@@ -200,7 +267,9 @@ def extract_fields_from_document(
     use_cache: bool = True,
 ) -> dict:
     """
-    Extracts structured fields from a PDF or document image using offline Donut DocVQA.
+    Extracts structured fields from a PDF or document image.
+    Uses Donut DocVQA if available, with automatic robust OCR fallback
+    if Donut is not downloaded or running on low-resource hardware.
     Includes SHA-256 caching for instantaneous repeats.
     """
     if not fields:
@@ -217,50 +286,67 @@ def extract_fields_from_document(
             }
 
     start_time = time.time()
+    image, total_pages = render_document_page(file_bytes, filename, page_num=page_num)
     processor, model, device = get_donut_pipeline()
 
-    image, total_pages = render_document_page(file_bytes, filename, page_num=page_num)
-
-    pixel_values = processor(image, return_tensors="pt").pixel_values
-    pixel_values = pixel_values.to(device)
-
     extracted_results = {}
+    used_engine = "donut"
 
-    for field in fields:
-        field_clean = field.strip()
-        if not field_clean:
-            continue
+    # Try Donut inference if model is available
+    if processor is not None and model is not None:
+        try:
+            pixel_values = processor(image, return_tensors="pt").pixel_values.to(device)
 
-        prompt = f"<s_docvqa><s_question>What is the {field_clean}?</s_question><s_answer>"
-        decoder_input_ids = processor.tokenizer(
-            prompt,
-            add_special_tokens=False,
-            return_tensors="pt"
-        ).input_ids.to(device)
+            for field in fields:
+                field_clean = field.strip()
+                if not field_clean:
+                    continue
 
-        with torch.no_grad():
-            outputs = model.generate(
-                pixel_values,
-                decoder_input_ids=decoder_input_ids,
-                max_new_tokens=48,
-                pad_token_id=processor.tokenizer.pad_token_id,
-                eos_token_id=processor.tokenizer.eos_token_id,
-                use_cache=True,
-                num_beams=1,
-                bad_words_ids=[[processor.tokenizer.unk_token_id]],
-                return_dict_in_generate=True,
-            )
+                prompt = f"<s_docvqa><s_question>What is the {field_clean}?</s_question><s_answer>"
+                decoder_input_ids = processor.tokenizer(
+                    prompt,
+                    add_special_tokens=False,
+                    return_tensors="pt"
+                ).input_ids.to(device)
 
-        seq = processor.batch_decode(outputs.sequences)[0]
-        seq = seq.replace(processor.tokenizer.eos_token, "").replace(processor.tokenizer.pad_token, "")
+                with torch.no_grad():
+                    outputs = model.generate(
+                        pixel_values,
+                        decoder_input_ids=decoder_input_ids,
+                        max_new_tokens=48,
+                        pad_token_id=processor.tokenizer.pad_token_id,
+                        eos_token_id=processor.tokenizer.eos_token_id,
+                        use_cache=True,
+                        num_beams=1,
+                        bad_words_ids=[[processor.tokenizer.unk_token_id]],
+                        return_dict_in_generate=True,
+                    )
 
-        match = re.search(r"<s_answer>(.*?)(?:</s_answer>|$)", seq, flags=re.DOTALL)
-        if match:
-            raw_answer = match.group(1)
-        else:
-            raw_answer = seq.split("<s_answer>")[-1] if "<s_answer>" in seq else seq
+                seq = processor.batch_decode(outputs.sequences)[0]
+                seq = seq.replace(processor.tokenizer.eos_token, "").replace(processor.tokenizer.pad_token, "")
 
-        extracted_results[field_clean] = clean_extracted_value(raw_answer)
+                match = re.search(r"<s_answer>(.*?)(?:</s_answer>|$)", seq, flags=re.DOTALL)
+                if match:
+                    raw_answer = match.group(1)
+                else:
+                    raw_answer = seq.split("<s_answer>")[-1] if "<s_answer>" in seq else seq
+
+                extracted_results[field_clean] = clean_extracted_value(raw_answer)
+
+        except Exception as e:
+            logger.warning(f"Donut inference failed on page {page_num}: {e}. Falling back to OCR extraction.")
+            extracted_results = {}
+            used_engine = "ocr_fallback"
+
+    # OCR Fallback if Donut was unavailable or failed
+    if not extracted_results and TESSERACT_AVAILABLE:
+        used_engine = "ocr_fallback"
+        try:
+            page_text = ocr_extract_text_from_image(image, lang="auto")
+            extracted_results = _extract_fields_via_ocr_regex(page_text, fields)
+        except Exception as e:
+            logger.error(f"OCR fallback extraction also encountered error: {e}")
+            extracted_results = {f: "" for f in fields}
 
     elapsed_ms = int((time.time() - start_time) * 1000)
 
@@ -269,6 +355,7 @@ def extract_fields_from_document(
         "page": page_num + 1,
         "total_pages": total_pages,
         "extracted_fields": extracted_results,
+        "engine_used": used_engine,
         "inference_time_ms": elapsed_ms,
         "cached": False,
         "cache_key": cache_key,
@@ -284,7 +371,6 @@ def extract_fields_from_document(
 # Tesseract OCR — Universal Multi-Language Text Extraction
 # ============================================================
 
-# Discover all installed Tesseract language packs on startup
 _INSTALLED_LANGS: List[str] = []
 
 def _discover_tesseract_languages() -> List[str]:
@@ -294,7 +380,6 @@ def _discover_tesseract_languages() -> List[str]:
         return []
     try:
         langs = pytesseract.get_languages(config="")
-        # Filter out 'osd' (orientation/script detection) from lang list
         _INSTALLED_LANGS = [l for l in langs if l != "osd"]
         logger.info(f"Tesseract installed languages ({len(_INSTALLED_LANGS)}): {_INSTALLED_LANGS}")
         return _INSTALLED_LANGS
@@ -334,7 +419,8 @@ def get_available_languages() -> Dict[str, Any]:
 def resolve_ocr_lang(lang: str) -> str:
     """
     Resolves the language parameter for Tesseract:
-    - 'auto' → uses ALL installed languages (Tesseract picks best per character)
+    - 'auto' → prioritizes eng+hin if available, or detected script.
+      Never combines 10+ languages which degrades Tesseract performance.
     - specific lang code (e.g. 'hin', 'eng+hin') → validated against installed packs
     - unknown lang → falls back to 'eng' or whatever is installed
     """
@@ -342,26 +428,24 @@ def resolve_ocr_lang(lang: str) -> str:
         _discover_tesseract_languages()
 
     if not _INSTALLED_LANGS:
-        raise RuntimeError("No Tesseract language packs are available")
+        return "eng"
 
     if lang.lower() == "auto":
-        # Use all installed languages — Tesseract will auto-detect per character
-        return "+".join(_INSTALLED_LANGS)
+        # Safe default: eng+hin if Hindi is installed, otherwise eng
+        if "hin" in _INSTALLED_LANGS and "eng" in _INSTALLED_LANGS:
+            return "eng+hin"
+        elif "hin" in _INSTALLED_LANGS:
+            return "hin"
+        elif "eng" in _INSTALLED_LANGS:
+            return "eng"
+        return _INSTALLED_LANGS[0]
 
     # User specified explicit langs like "eng+hin+ben"
     requested = [l.strip() for l in lang.split("+") if l.strip()]
     valid_langs = [l for l in requested if l in _INSTALLED_LANGS]
 
     if not valid_langs:
-        logger.warning(
-            f"Requested lang(s) {requested} not found in installed: {_INSTALLED_LANGS}. "
-            f"Using all installed languages."
-        )
-        return "+".join(_INSTALLED_LANGS)
-
-    if len(valid_langs) < len(requested):
-        missing = [l for l in requested if l not in _INSTALLED_LANGS]
-        logger.warning(f"Some requested langs not installed: {missing}. Using: {valid_langs}")
+        return "eng" if "eng" in _INSTALLED_LANGS else _INSTALLED_LANGS[0]
 
     return "+".join(valid_langs)
 
@@ -382,14 +466,14 @@ def detect_script_from_image(image: Image.Image) -> Optional[str]:
             logger.info(f"Detected script: {script} (confidence: {confidence})")
             return script
     except Exception as e:
-        logger.debug(f"OSD script detection failed (normal for small images): {e}")
+        logger.debug(f"OSD script detection notice (normal for simple images): {e}")
     return None
 
 
 # Mapping from Tesseract script names to language codes
 _SCRIPT_TO_LANG = {
     "Latin": "eng",
-    "Devanagari": "hin+mar+san+nep",
+    "Devanagari": "hin+mar",
     "Bengali": "ben",
     "Gujarati": "guj",
     "Gurmukhi": "pan",
@@ -400,20 +484,6 @@ _SCRIPT_TO_LANG = {
     "Telugu": "tel",
     "Arabic": "ara+urd",
     "Cyrillic": "rus",
-    "Han": "chi_sim+chi_tra",
-    "Hangul": "kor",
-    "Japanese": "jpn",
-    "Thai": "tha",
-    "Georgian": "kat",
-    "Armenian": "hye",
-    "Hebrew": "heb",
-    "Greek": "ell",
-    "Tibetan": "bod",
-    "Sinhala": "sin",
-    "Myanmar": "mya",
-    "Khmer": "khm",
-    "Lao": "lao",
-    "Ethiopic": "amh+tir",
 }
 
 
@@ -424,7 +494,6 @@ def _resolve_script_to_lang(script: Optional[str]) -> Optional[str]:
     candidates = _SCRIPT_TO_LANG.get(script, "")
     if not candidates:
         return None
-    # Filter to only installed languages
     requested = [l.strip() for l in candidates.split("+") if l.strip()]
     valid = [l for l in requested if l in _INSTALLED_LANGS]
     return "+".join(valid) if valid else None
@@ -433,55 +502,43 @@ def _resolve_script_to_lang(script: Optional[str]) -> Optional[str]:
 def ocr_extract_text_from_image(image: Image.Image, lang: str = "auto") -> str:
     """
     Extracts full text from a PIL Image using Tesseract OCR.
-    
-    lang='auto' (default): Auto-detects the script/language in the image and
-    uses the best matching installed language packs. Falls back to using ALL
-    installed languages for maximum coverage.
-    
-    Supports any language that has a Tesseract language pack installed.
+    Safely handles script detection and missing language fallbacks.
+    Never raises an unhandled exception to caller.
     """
     if not TESSERACT_AVAILABLE:
-        raise RuntimeError("Tesseract executable or pytesseract is unavailable")
+        logger.warning("Tesseract OCR is not available.")
+        return ""
 
     try:
         if lang.lower() == "auto":
-            # Step 1: Try script detection to narrow down languages
             detected_script = detect_script_from_image(image)
             script_lang = _resolve_script_to_lang(detected_script)
 
             if script_lang:
-                # Always include 'eng' alongside detected script for mixed documents
                 if "eng" in _INSTALLED_LANGS and "eng" not in script_lang:
                     resolved_lang = f"eng+{script_lang}"
                 else:
                     resolved_lang = script_lang
-                logger.info(f"Auto-detected script '{detected_script}' → using lang: {resolved_lang}")
             else:
-                # Fallback: use all installed languages
                 resolved_lang = resolve_ocr_lang("auto")
-                logger.info(f"Script detection inconclusive → using all langs: {resolved_lang}")
         else:
             resolved_lang = resolve_ocr_lang(lang)
 
         text = pytesseract.image_to_string(image, lang=resolved_lang)
         return text.strip()
 
-    except pytesseract.TesseractError as e:
+    except Exception as e:
         error_msg = str(e)
-        # If the lang string caused an error (missing pack), retry with just 'eng'
-        if "Failed loading language" in error_msg or "Tesseract Open Source OCR Engine" in error_msg:
-            logger.warning(f"Lang '{lang}' failed, retrying with 'eng' only: {e}")
+        # If the resolved language failed, retry with 'eng' only
+        if "eng" in _INSTALLED_LANGS:
             try:
                 text = pytesseract.image_to_string(image, lang="eng")
                 return text.strip()
             except Exception as e2:
-                logger.error(f"Tesseract fallback OCR also failed: {e2}")
-                raise RuntimeError(f"Tesseract OCR failed: {e2}") from e2
+                logger.error(f"Tesseract OCR fallback error: {e2}")
+                return ""
         logger.error(f"Tesseract OCR error: {e}")
-        raise RuntimeError(f"Tesseract OCR failed: {e}") from e
-    except Exception as e:
-        logger.error(f"Tesseract OCR error: {e}")
-        raise RuntimeError(f"Tesseract OCR failed: {e}") from e
+        return ""
 
 
 def ocr_extract_text_from_page(
@@ -492,9 +549,9 @@ def ocr_extract_text_from_page(
     dpi: int = 300,
 ) -> Dict[str, Any]:
     """
-    Renders a single page of a PDF/image at the specified DPI,
+    Renders a single page of a PDF/image at specified DPI,
     then runs Tesseract OCR for full text extraction.
-    lang='auto' auto-detects the language. Uses SHA-256 caching.
+    Uses SHA-256 caching for zero-latency repeats.
     """
     if not TESSERACT_AVAILABLE:
         return {"text": "", "error": "Tesseract OCR not available"}
@@ -505,22 +562,33 @@ def ocr_extract_text_from_page(
         return {**cached, "cached": True, "cache_key": cache_key}
 
     start_time = time.time()
-
     ext = os.path.splitext(filename)[1].lower()
+
     if ext in [".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff"]:
-        image = Image.open(io.BytesIO(file_bytes)).convert("RGB")
-        total_pages = 1
+        try:
+            image = Image.open(io.BytesIO(file_bytes)).convert("RGB")
+            total_pages = 1
+        except Exception as e:
+            return {"text": "", "error": f"Invalid image file: {e}"}
     else:
-        doc = pymupdf.open(stream=file_bytes, filetype="pdf")
-        total_pages = len(doc)
-        if total_pages == 0:
-            doc.close()
-            return {"text": "", "error": "PDF contains no pages"}
-        page_num = _normalize_page_num(page_num, total_pages)
-        page = doc[page_num]
-        pix = page.get_pixmap(dpi=dpi)
-        image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-        doc.close()
+        doc = None
+        try:
+            doc = pymupdf.open(stream=file_bytes, filetype="pdf")
+            total_pages = len(doc)
+            if total_pages == 0:
+                return {"text": "", "error": "PDF contains no pages"}
+            page_num = _normalize_page_num(page_num, total_pages)
+            page = doc[page_num]
+            pix = page.get_pixmap(dpi=dpi)
+            image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        except Exception as e:
+            return {"text": "", "error": f"Failed to render PDF page: {e}"}
+        finally:
+            if doc is not None:
+                try:
+                    doc.close()
+                except Exception:
+                    pass
 
     text = ocr_extract_text_from_image(image, lang=lang)
     resolved = resolve_ocr_lang(lang)
@@ -564,8 +632,8 @@ def ocr_extract_full_document(
         return {"pages": [], "full_text": "", "error": "Tesseract OCR not available"}
 
     start_time = time.time()
-
     ext = os.path.splitext(filename)[1].lower()
+
     if ext in [".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff"]:
         page_result = ocr_extract_text_from_page(file_bytes, filename, 0, lang, dpi)
         return {
@@ -578,38 +646,52 @@ def ocr_extract_full_document(
             "inference_time_ms": int((time.time() - start_time) * 1000),
         }
 
-    doc = pymupdf.open(stream=file_bytes, filetype="pdf")
-    if len(doc) == 0:
-        doc.close()
-        return {"pages": [], "full_text": "", "error": "PDF contains no pages"}
-    total_pages = min(len(doc), max_pages)
-    pages_data = []
-    all_text_parts = []
+    doc = None
+    try:
+        doc = pymupdf.open(stream=file_bytes, filetype="pdf")
+        if len(doc) == 0:
+            return {"pages": [], "full_text": "", "error": "PDF contains no pages"}
 
-    for i in range(total_pages):
-        page = doc[i]
-        pix = page.get_pixmap(dpi=dpi)
-        image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-        page_text = ocr_extract_text_from_image(image, lang=lang)
-        pages_data.append({"page": i + 1, "text": page_text})
-        all_text_parts.append(page_text)
+        total_pages = min(len(doc), max_pages)
+        pages_data = []
+        all_text_parts = []
 
-    doc.close()
-    full_text = "\n\n--- Page Break ---\n\n".join(all_text_parts)
-    elapsed_ms = int((time.time() - start_time) * 1000)
+        for i in range(total_pages):
+            try:
+                page = doc[i]
+                pix = page.get_pixmap(dpi=dpi)
+                image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                page_text = ocr_extract_text_from_image(image, lang=lang)
+                pages_data.append({"page": i + 1, "text": page_text})
+                all_text_parts.append(page_text)
+            except Exception as page_err:
+                logger.warning(f"Error on page {i + 1} of {filename}: {page_err}")
+                pages_data.append({"page": i + 1, "text": ""})
 
-    return {
-        "filename": filename,
-        "total_pages": total_pages,
-        "pages": pages_data,
-        "full_text": full_text,
-        "char_count": len(full_text),
-        "word_count": len(full_text.split()) if full_text else 0,
-        "ocr_engine": "tesseract",
-        "lang_requested": lang,
-        "dpi": dpi,
-        "inference_time_ms": elapsed_ms,
-    }
+        full_text = "\n\n--- Page Break ---\n\n".join(all_text_parts)
+        elapsed_ms = int((time.time() - start_time) * 1000)
+
+        return {
+            "filename": filename,
+            "total_pages": total_pages,
+            "pages": pages_data,
+            "full_text": full_text,
+            "char_count": len(full_text),
+            "word_count": len(full_text.split()) if full_text else 0,
+            "ocr_engine": "tesseract",
+            "lang_requested": lang,
+            "dpi": dpi,
+            "inference_time_ms": elapsed_ms,
+        }
+    except Exception as e:
+        logger.error(f"Error extracting full document {filename}: {e}")
+        return {"pages": [], "full_text": "", "error": str(e)}
+    finally:
+        if doc is not None:
+            try:
+                doc.close()
+            except Exception:
+                pass
 
 
 def hybrid_extract(
@@ -621,11 +703,10 @@ def hybrid_extract(
 ) -> Dict[str, Any]:
     """
     Hybrid extraction combining:
-    1. Donut DocVQA — for structured field extraction (targeted Q&A)
+    1. Donut DocVQA / OCR field extraction — for structured field extraction
     2. Tesseract OCR — for full-text extraction (complete page text)
 
-    lang='auto' auto-detects language for OCR.
-    Returns both results together for maximum coverage.
+    Never crashes: if Donut fails, OCR results are still returned.
     """
     result = {
         "filename": filename,
@@ -634,24 +715,34 @@ def hybrid_extract(
         "ocr_full_text": "",
     }
 
-    # Donut field extraction
+    # Field extraction (Donut with OCR fallback)
     if fields:
-        donut_result = extract_fields_from_document(
-            file_bytes, filename, fields, page_num
-        )
-        result["donut_fields"] = donut_result.get("extracted_fields", {})
-        result["donut_inference_ms"] = donut_result.get("inference_time_ms", 0)
-        result["donut_cached"] = donut_result.get("cached", False)
+        try:
+            donut_result = extract_fields_from_document(
+                file_bytes, filename, fields, page_num
+            )
+            result["donut_fields"] = donut_result.get("extracted_fields", {})
+            result["donut_inference_ms"] = donut_result.get("inference_time_ms", 0)
+            result["donut_cached"] = donut_result.get("cached", False)
+            result["engine_used"] = donut_result.get("engine_used", "donut")
+        except Exception as e:
+            logger.warning(f"Field extraction error in hybrid_extract: {e}")
+            result["donut_fields"] = {}
 
-    # Tesseract full-text OCR (universal language)
+    # Tesseract full-text OCR
     if TESSERACT_AVAILABLE:
-        ocr_result = ocr_extract_text_from_page(
-            file_bytes, filename, page_num, lang=lang
-        )
-        result["ocr_full_text"] = ocr_result.get("text", "")
-        result["ocr_lang_resolved"] = ocr_result.get("lang_resolved", lang)
-        result["ocr_inference_ms"] = ocr_result.get("inference_time_ms", 0)
-        result["ocr_cached"] = ocr_result.get("cached", False)
+        try:
+            ocr_result = ocr_extract_text_from_page(
+                file_bytes, filename, page_num, lang=lang
+            )
+            result["ocr_full_text"] = ocr_result.get("text", "")
+            result["ocr_lang_resolved"] = ocr_result.get("lang_resolved", lang)
+            result["ocr_inference_ms"] = ocr_result.get("inference_time_ms", 0)
+            result["ocr_cached"] = ocr_result.get("cached", False)
+        except Exception as e:
+            logger.error(f"OCR error in hybrid_extract: {e}")
+            result["ocr_full_text"] = ""
+            result["ocr_error"] = str(e)
     else:
         result["ocr_full_text"] = ""
         result["ocr_error"] = "Tesseract not available"

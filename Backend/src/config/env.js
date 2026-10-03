@@ -2,7 +2,9 @@ const path = require('path');
 const dotenv = require('dotenv');
 const { z } = require('zod');
 
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+dotenv.config({ path: path.resolve(__dirname, '../../Backend/.env') });
 dotenv.config();
 
 const envSchema = z.object({
@@ -13,7 +15,7 @@ const envSchema = z.object({
   JWT_ACCESS_SECRET: z.string().trim().min(1, 'JWT_ACCESS_SECRET is required').default('coalgov_super_secret_access_token_key_2026'),
   JWT_REFRESH_SECRET: z.string().trim().min(1, 'JWT_REFRESH_SECRET is required').default('coalgov_super_secret_refresh_token_key_2026'),
   JWT_ACCESS_EXPIRES_IN: z.string().default('30d'),
-  JWT_REFRESH_EXPIRES_IN: z.string().default('30d'),
+  JWT_REFRESH_EXPIRES_IN: z.string().default('60d'),
 });
 
 const parsedEnv = envSchema.safeParse(process.env);

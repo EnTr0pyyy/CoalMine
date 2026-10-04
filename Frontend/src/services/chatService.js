@@ -47,6 +47,7 @@ export async function streamChatMessage({
   onToken,
   onComplete,
   onError,
+  onTask,
 }) {
   try {
     const { userId } = getCurrentAuth();
@@ -95,6 +96,7 @@ export async function streamChatMessage({
             if (data.error) {
               if (onError) onError(new Error(data.error));
             }
+            if (data.task && onTask) onTask(data.task);
           } catch (parseErr) {
             // Non-json SSE data line
           }
@@ -127,6 +129,7 @@ export async function getConversations() {
           title: s.title || 'Conversation',
           isPersistent: s.isPersistent,
           createdAt: s.createdAt,
+          activeDocumentId: s.activeDocumentId || null,
           messages: s.messages || [],
         }));
         setUserLocalConversations(userId, loaded);
@@ -164,7 +167,7 @@ export async function getConversation(id) {
 /**
  * Create a new conversation session for current user
  */
-export async function createConversation(isPersistent = false, title = 'New Chat') {
+export async function createConversation(isPersistent = true, title = 'New Chat') {
   const { userId } = getCurrentAuth();
   const newConv = {
     id: `session-${Date.now()}`,
@@ -258,10 +261,11 @@ export async function wipeUserTemporaryChats() {
 /**
  * Upload document for RAG indexing
  */
-export async function uploadDocument(file) {
+export async function uploadDocument(file, sessionId = null) {
   const { token, userId } = getCurrentAuth();
   const formData = new FormData();
   formData.append('file', file);
+  if (sessionId) formData.append('sessionId', sessionId);
 
   const res = await fetch(`${API_BASE_URL}/chat/documents`, {
     method: 'POST',
@@ -331,6 +335,63 @@ export async function deleteDocument(documentId) {
   }
 }
 
+export async function getWorkspace(sessionId) {
+  const res = await fetch(`${API_BASE_URL}/sessions/${sessionId}/workspace`, { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error('Unable to load this workspace.');
+  const data = await res.json();
+  return data.workspace;
+}
+
+export async function attachDocumentToWorkspace(sessionId, documentId, role = 'SOURCE') {
+  const res = await fetch(`${API_BASE_URL}/sessions/${sessionId}/documents`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ documentId, role }),
+  });
+  if (!res.ok) throw new Error('Unable to attach document to this workspace.');
+  return res.json();
+}
+
+export async function detachDocumentFromWorkspace(sessionId, documentId) {
+  const res = await fetch(`${API_BASE_URL}/sessions/${sessionId}/documents/${documentId}`, {
+    method: 'DELETE',
+    headers: getAuthHeaders(),
+  });
+  return res.ok;
+}
+
+export async function getWorkspaceTasks(sessionId = null) {
+  const suffix = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : '';
+  const res = await fetch(`${API_BASE_URL}/tasks${suffix}`, { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error('Unable to load background tasks.');
+  const data = await res.json();
+  return data.tasks || [];
+}
+
+export async function cancelWorkspaceTask(taskId) {
+  const res = await fetch(`${API_BASE_URL}/tasks/${taskId}/cancel`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) throw new Error('Unable to cancel task.');
+  return res.json();
+}
+
+export async function getDocumentVersions(documentId) {
+  const res = await fetch(`${API_BASE_URL}/documents/${documentId}/versions`, { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error('Unable to load document versions.');
+  const data = await res.json();
+  return data.versions || [];
+}
+
+export async function compareDocumentVersions(documentId, fromVersion, toVersion) {
+  const res = await fetch(`${API_BASE_URL}/documents/${documentId}/versions/${fromVersion}/compare/${toVersion}`, {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) throw new Error('Unable to compare document versions.');
+  return res.json();
+}
+
 export const chatService = {
   streamChatMessage,
   getConversations,
@@ -344,4 +405,11 @@ export const chatService = {
   getDocuments,
   getDocumentChunks,
   deleteDocument,
+  getWorkspace,
+  attachDocumentToWorkspace,
+  detachDocumentFromWorkspace,
+  getWorkspaceTasks,
+  cancelWorkspaceTask,
+  getDocumentVersions,
+  compareDocumentVersions,
 };

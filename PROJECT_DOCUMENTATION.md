@@ -196,3 +196,35 @@ To connect clients to the local server, run:
 ```powershell
 .\start-all.ps1 -OfflineServer <SERVER_LAN_IP>
 ```
+
+---
+
+## 7. Persistent AI Document Workspace
+
+The Copilot is a durable workspace rather than a page-local chat. Persistent sessions can now own source documents, working/generated documents, background tasks, and version history:
+
+```text
+ChatSession
+ ├── ChatDocument (SOURCE / WORKING / GENERATED)
+ ├── Message
+ └── WorkspaceTask (QUEUED → READING → ANALYZING → GENERATING → COMPLETED)
+
+Document (immutable source or editable working file)
+ └── DocumentVersion (v1, v2, v3…)
+```
+
+### Workspace API
+
+- `GET /api/sessions/:id/workspace` — restore attached documents, versions, and task history.
+- `POST /api/sessions/:id/documents` / `DELETE ...` — attach or detach a document.
+- `POST /api/tasks` — start `ANALYZE_DOCUMENT`, `COMPARE_DOCUMENTS`, `GENERATE_REPORT`, or `EDIT_DOCUMENT`.
+- `GET /api/tasks` and `POST /api/tasks/:id/cancel` — monitor or cancel durable work.
+- `GET /api/documents/:documentId/versions` — list immutable versions.
+- `GET /api/documents/:documentId/versions/:from/compare/:to` — return structured changed fields.
+- `GET/POST /api/automations` — persist document-upload or scheduled automation definitions.
+- `POST /api/reports/tasks` and `POST /api/reports/tasks/upload` — queue database or uploaded Report Studio synthesis as a durable background task.
+- Report Studio jobs accept `copilotSessionId`; the worker loads that persistent Copilot conversation (or the latest one) and passes it to the ML prompt as analyst context.
+
+Chat requests that clearly ask to analyze, compare, generate, or edit an attached document are converted into server-side tasks. The frontend only displays their status, so changing routes or browser tabs does not stop the operation. Pending tasks are recovered from PostgreSQL when the backend starts again. Source files remain immutable; generated and edited reports are stored as new versions and rendered DOCX files when the ML exporter is available.
+
+Report Studio follows the same lifecycle. The browser receives a task id immediately, stores it per user, and polls `/api/tasks/:id` after a route/tab switch. OCR, historical-document synthesis, Copilot context reconciliation, LLM generation, and DOCX versioning therefore continue on the backend even when the Reports page is unmounted.

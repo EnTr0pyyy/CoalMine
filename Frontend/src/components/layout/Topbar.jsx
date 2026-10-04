@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Menu, Bell, ChevronDown, LogOut, Settings, Megaphone, Landmark, Search } from 'lucide-react';
+import { Menu, Bell, ChevronDown, LogOut, Settings, Megaphone, Landmark, Search, ListTodo } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth.js';
 import { roleLabel } from '../../utils/roles.js';
 import { departmentLabel } from '../../utils/departments.js';
 import { notificationService } from '../../services/notificationService.js';
 import { noticeService } from '../../services/noticeService.js';
 import GlobalSearchModal from './GlobalSearchModal.jsx';
+import { chatService } from '../../services/chatService.js';
 
 function initials(name = '') {
   return name
@@ -24,6 +25,7 @@ export default function Topbar({ onMenuClick }) {
   const [unreadCount, setUnreadCount] = useState(0);
   const [topNotice, setTopNotice] = useState(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [runningTasks, setRunningTasks] = useState(0);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -43,6 +45,24 @@ export default function Topbar({ onMenuClick }) {
       if (active.length > 0) setTopNotice(active[0]);
     });
   }, [location.pathname, user?.department]);
+
+  useEffect(() => {
+    let mounted = true;
+    const loadTasks = async () => {
+      try {
+        const tasks = await chatService.getWorkspaceTasks();
+        if (mounted) setRunningTasks(tasks.filter((task) => !['COMPLETED', 'FAILED', 'CANCELLED'].includes(task.status)).length);
+      } catch (_) {
+        if (mounted) setRunningTasks(0);
+      }
+    };
+    loadTasks();
+    const interval = window.setInterval(loadTasks, 15000);
+    return () => {
+      mounted = false;
+      window.clearInterval(interval);
+    };
+  }, [user?.id]);
 
   return (
     <header className="sticky top-0 z-20 flex h-16 shrink-0 items-center justify-between border-b border-border bg-surface-card/95 backdrop-blur-md px-4 sm:px-6">
@@ -110,6 +130,20 @@ export default function Topbar({ onMenuClick }) {
           {unreadCount > 0 && (
             <span className="absolute right-1.5 top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-status-danger px-1 text-[10px] font-semibold text-white">
               {unreadCount}
+            </span>
+          )}
+        </Link>
+
+        <Link
+          to="/copilot"
+          className="relative rounded-lg p-2 text-ink-700 hover:bg-surface-sunken transition"
+          aria-label="Background workspace tasks"
+          title={runningTasks ? `${runningTasks} background task${runningTasks === 1 ? '' : 's'} running` : 'Background workspace tasks'}
+        >
+          <ListTodo size={18} />
+          {runningTasks > 0 && (
+            <span className="absolute right-0.5 top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-status-warning px-1 text-[10px] font-semibold text-white">
+              {runningTasks}
             </span>
           )}
         </Link>

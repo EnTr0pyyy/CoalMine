@@ -114,11 +114,29 @@ if (-not $nodeCommand) {
     exit 1
 }
 
-if (Test-Endpoint -Url 'http://127.0.0.1:5000/health') {
+$backendHealthReady = Test-Endpoint -Url 'http://127.0.0.1:5000/health'
+# A health-only check can incorrectly keep an older node process alive after the
+# source is updated. Verify the durable workspace route that Report Studio needs.
+$workspaceApiReady = Test-Endpoint -Url 'http://127.0.0.1:5000/api/tasks?userId=bootstrap'
+
+if ($backendHealthReady -and $workspaceApiReady) {
     Write-Host '      ✓ Backend is already running (http://localhost:5000)' -ForegroundColor Green
 }
 else {
-    Write-Host '      ⚠ Backend health check failed. Ensuring PostgreSQL is running...' -ForegroundColor Yellow
+    if ($backendHealthReady -and -not $workspaceApiReady) {
+        Write-Host '      ⚠ Backend is healthy but running an older build. Restarting it to load the current API routes...' -ForegroundColor Yellow
+        $staleBackend = Get-NetTCPConnection -LocalPort 5000 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($staleBackend) {
+            Stop-Process -Id $staleBackend.OwningProcess -Force
+            Start-Sleep -Seconds 1
+        }
+    }
+    if ($backendHealthReady) {
+        Write-Host '      Ensuring PostgreSQL is running before starting the current backend build...' -ForegroundColor Yellow
+    }
+    else {
+        Write-Host '      ⚠ Backend health check failed. Ensuring PostgreSQL is running...' -ForegroundColor Yellow
+    }
     Push-Location (Join-Path $rootDir 'Backend')
     try {
         & $nodeCommand.Source -e 'require("./src/config/dbLauncher").ensurePostgresRunning().then(function () { process.exit(0); }).catch(function (error) { console.error(error); process.exit(1); });'

@@ -13,15 +13,15 @@ export const reportsService = {
     }
   },
 
-  generateAutomatedReport: async ({ templateType, subsidiary, period, metrics, selectedDocumentIds }) => {
-    return apiClient.post('/reports/generate', { templateType, subsidiary, period, metrics, selectedDocumentIds });
+  generateAutomatedReport: async ({ templateType, subsidiary, period, metrics, selectedDocumentIds, copilotSessionId }) => {
+    return apiClient.post('/reports/tasks', { templateType, subsidiary, period, metrics, selectedDocumentIds, copilotSessionId });
   },
 
   generateReport: async (payload) => {
     return apiClient.post('/reports', payload);
   },
 
-  analyzeAndGenerateFromUpload: async (file, { templateType, subsidiary, period, saveToDatabase, selectedDocumentIds } = {}) => {
+  analyzeAndGenerateFromUpload: async (file, { templateType, subsidiary, period, saveToDatabase, selectedDocumentIds, copilotSessionId } = {}) => {
     const formData = new FormData();
     formData.append('file', file);
     if (templateType) formData.append('templateType', templateType);
@@ -31,7 +31,13 @@ export const reportsService = {
     if (selectedDocumentIds && selectedDocumentIds.length > 0) {
       formData.append('selectedDocumentIds', JSON.stringify(selectedDocumentIds));
     }
-    return apiClient.postForm('/reports/analyze-upload', formData);
+    if (copilotSessionId) formData.append('copilotSessionId', copilotSessionId);
+    return apiClient.postForm('/reports/tasks/upload', formData);
+  },
+
+  getTask: async (taskId) => {
+    const response = await apiClient.get(`/tasks/${encodeURIComponent(taskId)}`);
+    return response.task || response;
   },
 
   // ── Ministry-Grade PDF Export (WeasyPrint via ML service) ──

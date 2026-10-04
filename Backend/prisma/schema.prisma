@@ -27,7 +27,10 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  chatSessions ChatSession[]
+  chatSessions   ChatSession[]
+  documents      Document[]      @relation("DocumentOwner")
+  workspaceTasks WorkspaceTask[]
+  automations    Automation[]
 
   @@map("users")
 }
@@ -270,6 +273,7 @@ model ContractorPerformance {
 
 model Document {
   id            String   @id @default(uuid())
+  userId        String?
   name          String
   fileType      String?
   mineId        String?
@@ -278,8 +282,17 @@ model Document {
   uploadedDate  DateTime @default(now())
   extractedData Json?
   fileUrl       String?
+  isImmutable   Boolean  @default(true)
+  currentVersionId String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+
+  owner         User?             @relation("DocumentOwner", fields: [userId], references: [id], onDelete: SetNull)
+  versions      DocumentVersion[]
+  chatLinks     ChatDocument[]
+  workspaceTasks WorkspaceTask[]
+
+  @@index([userId])
 
   @@map("documents")
 }
@@ -369,11 +382,16 @@ model ChatSession {
   userId       String?
   isPersistent Boolean   @default(false)
   title        String    @default("New Chat")
+  activeDocumentId String?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
   user         User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
   messages     Message[]
+  documentLinks ChatDocument[]
+  workspaceTasks WorkspaceTask[]
+
+  @@index([userId, updatedAt])
 
   @@map("chat_sessions")
 }
@@ -400,4 +418,87 @@ model DocumentChunk {
   createdAt     DateTime @default(now()) @map("created_at")
 
   @@map("document_chunks")
+}
+
+// A chat workspace can attach the same repository document in a specific role.
+// The original source stays immutable; generated/working documents are versioned below.
+model ChatDocument {
+  id          String   @id @default(uuid())
+  sessionId   String
+  documentId  String
+  role        String   @default("SOURCE") // SOURCE, WORKING, GENERATED
+  attachedAt  DateTime @default(now())
+
+  session     ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  document    Document    @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, documentId])
+  @@index([documentId])
+  @@map("chat_documents")
+}
+
+// Content is stored as structured report JSON as well as an optional rendered file.
+// A new version is always created instead of replacing the previous one.
+model DocumentVersion {
+  id            String   @id @default(uuid())
+  documentId    String
+  versionNumber Int
+  label         String?
+  changeSummary String?
+  content       Json?
+  fileUrl       String?
+  createdById   String?
+  createdAt     DateTime @default(now())
+
+  document      Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, versionNumber])
+  @@index([documentId, createdAt])
+  @@map("document_versions")
+}
+
+// Durable state for work that must keep running while the user changes routes or tabs.
+model WorkspaceTask {
+  id          String   @id @default(uuid())
+  userId      String
+  sessionId   String?
+  documentId  String?
+  type        String   // ANALYZE_DOCUMENT, GENERATE_REPORT, REPORT_STUDIO_GENERATE, EDIT_DOCUMENT
+  status      String   @default("QUEUED") // QUEUED, READING, ANALYZING, GENERATING, VALIDATING, COMPLETED, FAILED, CANCELLED
+  progress    Int      @default(0)
+  currentStep String?
+  payload     Json?
+  result      Json?
+  error       String?
+  createdAt   DateTime @default(now())
+  startedAt   DateTime?
+  completedAt DateTime?
+  updatedAt   DateTime @updatedAt
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  session     ChatSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  document    Document?    @relation(fields: [documentId], references: [id], onDelete: SetNull)
+
+  @@index([userId, status, updatedAt])
+  @@index([sessionId, updatedAt])
+  @@map("workspace_tasks")
+}
+
+// Automation definitions are durable configuration. A worker may later execute
+// these for upload or schedule triggers without changing the chat model.
+model Automation {
+  id        String   @id @default(uuid())
+  userId    String
+  name      String
+  trigger   String   // DOCUMENT_UPLOADED, SCHEDULE
+  action    String   // ANALYZE_DOCUMENT, GENERATE_REPORT, COMPARE_DOCUMENTS
+  config    Json?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isActive])
+  @@map("automations")
 }

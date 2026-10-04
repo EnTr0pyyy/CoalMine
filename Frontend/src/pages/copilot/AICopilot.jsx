@@ -17,6 +17,8 @@ import {
   Copy,
   Check,
   Search,
+  Link2,
+  ListTodo,
 } from 'lucide-react';
 import ChatSidebar from '../../components/copilot/ChatSidebar.jsx';
 import ChatMessage from '../../components/copilot/ChatMessage.jsx';
@@ -37,7 +39,8 @@ export default function AICopilot() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   // Persistence toggle: Persistent (DB) vs Temporary ("Once Chat")
-  const [isPersistent, setIsPersistent] = useState(false);
+  const [isPersistent, setIsPersistent] = useState(true);
+  const [workspace, setWorkspace] = useState(null);
 
   // RAG Document Drawer / Modal state
   const [ragDrawerOpen, setRagDrawerOpen] = useState(false);
@@ -65,7 +68,7 @@ export default function AICopilot() {
         setActiveId(selectId);
       } else if (!activeId && list.length > 0) {
         setActiveId(list[0].id);
-        setIsPersistent(list[0].isPersistent ?? false);
+        setIsPersistent(list[0].isPersistent ?? true);
       }
     } catch (e) {
       console.warn('Failed to load conversations:', e);
@@ -83,6 +86,19 @@ export default function AICopilot() {
     }
   }
 
+  async function loadWorkspace(sessionId = activeId) {
+    if (!sessionId) {
+      setWorkspace(null);
+      return;
+    }
+    try {
+      const loaded = await chatService.getWorkspace(sessionId);
+      setWorkspace(loaded);
+    } catch (_) {
+      setWorkspace(null);
+    }
+  }
+
   useEffect(() => {
     setActiveId(null);
     setConversations([]);
@@ -92,10 +108,37 @@ export default function AICopilot() {
   }, [user?.id]);
 
   useEffect(() => {
+    if (!activeId || !isPersistent) {
+      setWorkspace(null);
+      return undefined;
+    }
+    loadWorkspace(activeId);
+    const interval = window.setInterval(() => loadWorkspace(activeId), 5000);
+    return () => window.clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId, isPersistent]);
+
+  useEffect(() => {
+    if (!activeId) return undefined;
+    let mounted = true;
+    chatService.getConversation(activeId).then((full) => {
+      if (mounted && full?.messages) {
+        setConversations((prev) => prev.map((conversation) => (
+          conversation.id === activeId ? { ...conversation, messages: full.messages } : conversation
+        )));
+      }
+    });
+    return () => { mounted = false; };
+  }, [activeId]);
+
+  useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [conversations, activeId, sending]);
 
   const active = conversations.find((c) => c.id === activeId);
+  const workspaceDocuments = workspace?.documents || [];
+  const workspaceTasks = workspace?.tasks || [];
+  const runningTasks = workspaceTasks.filter((task) => !['COMPLETED', 'FAILED', 'CANCELLED'].includes(task.status));
 
   async function handleNewChat(persistentOverride) {
     const persist = persistentOverride !== undefined ? persistentOverride : isPersistent;
@@ -112,15 +155,13 @@ export default function AICopilot() {
     setMobileSidebarOpen(false);
     const selected = conversations.find((c) => c.id === id);
     if (selected) {
-      setIsPersistent(selected.isPersistent ?? false);
-      // Load full messages if not loaded
-      if (!selected.messages || selected.messages.length === 0) {
-        const full = await chatService.getConversation(id);
-        if (full && full.messages) {
-          setConversations((prev) =>
-            prev.map((c) => (c.id === id ? { ...c, messages: full.messages } : c))
-          );
-        }
+      setIsPersistent(selected.isPersistent ?? true);
+      // The session list only includes a preview; always restore full durable history.
+      const full = await chatService.getConversation(id);
+      if (full && full.messages) {
+        setConversations((prev) =>
+          prev.map((c) => (c.id === id ? { ...c, messages: full.messages } : c))
+        );
       }
     }
   }
@@ -232,6 +273,7 @@ export default function AICopilot() {
         onError: (err) => {
           setError(err.message || 'Error occurred during streaming.');
         },
+        onTask: () => loadWorkspace(conversationId),
       });
     } catch (err) {
       setError(err.message || 'Failed to send message to AI Copilot.');
@@ -249,9 +291,20 @@ export default function AICopilot() {
     setUploadSuccess(null);
 
     try {
-      const res = await chatService.uploadDocument(file);
-      setUploadSuccess(`Ingested "${res.filename}" into RAG (${res.chunks_count} chunks indexed).`);
+      // Documents are attached to a saved workspace at ingestion time, so the
+      // Copilot retrieves them only for this conversation rather than globally.
+      let sessionId = activeId;
+      if (!sessionId || !isPersistent) {
+        const conv = await chatService.createConversation(true, 'Document Workspace');
+        sessionId = conv.id;
+        setConversations((prev) => [conv, ...prev]);
+        setActiveId(sessionId);
+        setIsPersistent(true);
+      }
+      const res = await chatService.uploadDocument(file, sessionId);
+      setUploadSuccess(`Attached "${res.filename}" to this workspace and indexed ${res.chunks_count} chunks.`);
       await loadDocuments();
+      await loadWorkspace(sessionId);
     } catch (err) {
       setUploadError(err.message || 'Failed to ingest document.');
     } finally {
@@ -405,6 +458,17 @@ export default function AICopilot() {
                 </span>
               )}
             </button>
+            {isPersistent && active && (
+              <div className="hidden items-center gap-1.5 rounded border border-brand-200 bg-brand-100/50 px-2.5 py-1.5 text-xs text-brand-800 md:flex">
+                <Link2 size={13} />
+                <span>{workspaceDocuments.length} attached</span>
+                {runningTasks.length > 0 && (
+                  <span className="ml-1 flex items-center gap-1 text-status-warning">
+                    <ListTodo size={13} /> {runningTasks.length} running
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -654,6 +718,32 @@ export default function AICopilot() {
 
         {/* Message Stream Display Area */}
         <div ref={scrollRef} className="flex-1 overflow-y-auto px-5 py-5">
+          {isPersistent && active && (
+            <section className="mx-auto mb-4 max-w-3xl rounded-lg border border-brand-200 bg-brand-100/35 px-3.5 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-xs font-semibold text-ink-900">
+                  <Link2 size={14} className="text-brand-700" />
+                  Workspace context
+                  <span className="font-normal text-ink-500">Documents and tasks stay available when you switch pages.</span>
+                </div>
+                {runningTasks.length > 0 && (
+                  <span className="flex items-center gap-1 text-[11px] font-semibold text-status-warning">
+                    <RefreshCw size={12} className="animate-spin" /> {runningTasks[0].progress}% · {runningTasks[0].currentStep || 'Working'}
+                  </span>
+                )}
+              </div>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {workspaceDocuments.length === 0 ? (
+                  <span className="text-[11px] text-ink-500">Attach a source document from RAG Docs to ground this conversation.</span>
+                ) : workspaceDocuments.map((link) => (
+                  <span key={link.id} className="rounded border border-border bg-white px-2 py-1 text-[11px] text-ink-700">
+                    {link.role === 'SOURCE' ? 'Source' : link.role === 'WORKING' ? 'Working' : 'Generated'} · {link.document?.name}
+                    {link.document?.versions?.[0] ? ` · v${link.document.versions[0].versionNumber}` : ''}
+                  </span>
+                ))}
+              </div>
+            </section>
+          )}
           {loadingList ? (
             <LoadingState label="Loading chats…" />
           ) : !active || (active.messages || []).length === 0 ? (
@@ -669,7 +759,7 @@ export default function AICopilot() {
                 <strong className={isPersistent ? 'text-status-success' : 'text-status-warning'}>
                   {isPersistent ? 'Persistent (Saved)' : 'Once Chat (Temporary)'}
                 </strong>
-                . Ask questions about mining safety, DGMS statutory compliance, or documents in your RAG index.
+                . Upload a source document through RAG Docs to attach it to this workspace, then ask Copilot to analyze, generate, or revise a report.
               </p>
               <div className="flex flex-col gap-2">
                 {CHAT_SUGGESTED_QUESTIONS.map((q) => (

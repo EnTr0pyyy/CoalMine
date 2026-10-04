@@ -63,7 +63,15 @@ class ReportEngine:
         doc_text = data.get('extracted_text', '') or data.get('document_text', '') or ''
         doc_section = ""
         if doc_text and len(doc_text.strip()) > 50:
-            doc_section = f"\n\nEXTRACTED SOURCE DOCUMENTS CONTENT (synthesize and analyze thoroughly):\n---\n{doc_text[:4000]}\n---"
+            doc_section = f"\n\nEXTRACTED SOURCE DOCUMENTS CONTENT (synthesize and analyze thoroughly; preserve actual figures):\n---\n{doc_text[:10000]}\n---"
+
+        copilot_context = str(data.get('copilot_context', '') or '').strip()
+        copilot_section = ""
+        if copilot_context:
+            copilot_section = (
+                "\n\nCOPILOT ANALYST CONTEXT (additional user-provided reasoning; incorporate relevant insights):\n"
+                "---\n" + copilot_context[:6500] + "\n---"
+            )
 
         filename = data.get('filename', '')
         filename_section = f"\n- Source Document(s): {filename}" if filename else ""
@@ -74,7 +82,7 @@ Produce a comprehensive, highly thorough, professional technical assessment repo
 - Report Subject: {template_type}
 - Command Subsidiary: {subsidiary}
 - Time Horizon / Period: {period}{filename_section}
-- Specific Metric Ledgers: {metrics_str}{doc_section}
+- Specific Metric Ledgers: {metrics_str}{doc_section}{copilot_section}
 
 Return ONLY valid JSON with exactly these keys:
 {{
@@ -88,7 +96,10 @@ Return ONLY valid JSON with exactly these keys:
 Instructions:
 1. Do NOT produce generic platitudes. Reference actual numbers, dates, locations, block names, and metrics from the text if available.
 2. Ground all insights directly in the source material.
-3. Keep the tone authoritative, technical, and ready for Ministry-level scrutiny."""
+3. Treat the Copilot analyst context as an important additional brief: incorporate its summary, risks, questions, and requested focus into the executive summary, detailed analysis, and recommendations. Do not silently omit it.
+4. Source-document figures are authoritative. If Copilot notes conflict with source figures, flag the discrepancy rather than inventing a value.
+5. Write substantial detail: at least 2-3 complete paragraphs in both the summary and detailedAnalysis, and explain causal links, variances, operational impact, and next actions.
+6. Keep the tone authoritative, technical, and ready for Ministry-level scrutiny."""
 
     async def _call_gemma_llm(self, prompt: str) -> Optional[Dict[str, Any]]:
         models_to_try = [self.chat_model]
@@ -107,7 +118,7 @@ Instructions:
                             "format": "json",
                             "options": {
                                 "temperature": 0.25,
-                                "num_predict": 1000,
+                                "num_predict": 1800,
                             }
                         }
                     )
@@ -140,6 +151,12 @@ Instructions:
 
         doc_text = data.get("extracted_text", "") or data.get("document_text", "") or ""
         filename = data.get("filename", "")
+        copilot_context = str(data.get("copilot_context", "") or "").strip()
+        copilot_note = ""
+        if copilot_context:
+            copilot_note = (
+                " Copilot analyst notes were incorporated into this assessment and should be reviewed alongside the source ledger."
+            )
 
         if doc_text and len(doc_text.strip()) > 100:
             preview = doc_text.strip()[:600].replace("\n", " ").strip()
@@ -148,7 +165,7 @@ Instructions:
             summary = (
                 f"Statutory analytical dossier compiled from verified source repository (Source: \"{filename or 'Integrated Databank'}\", "
                 f"comprising {word_count} extracted textual entries and operational ledgers). The ingested documents validate ongoing mining activities, "
-                f"geological strata evaluations, and command block dispatches across {subsidiary} operating zones for {period}."
+                f"geological strata evaluations, and command block dispatches across {subsidiary} operating zones for {period}.{copilot_note}"
             )
             
             detailed_analysis = (
@@ -159,6 +176,8 @@ Instructions:
                 f"Strata conditions and seam thickness profiles conform to CMPDI geological benchmarks for the command coalfields. "
                 f"Dispatch coordination via First Mile Connectivity (FMC) rail sidings continues to reduce pithead inventory accumulation."
             )
+            if copilot_context:
+                detailed_analysis += f"\n\nCopilot analyst context for this run:\n{copilot_context[-1800:]}"
 
             highlights = [
                 f"Primary source records verified from \"{filename or 'Knowledge Base'}\" with full cryptographic traceability.",
@@ -177,7 +196,7 @@ Instructions:
             summary = (
                 f"During {period}, {subsidiary} maintained structured mining operations, achieving a cumulative coal production "
                 f"of {prod} MT against the Ministry of Coal targeted allocation of {target} MT ({ach_pct}% target realization). "
-                f"Stripping activities yielded {obr} M.Cu.m of overburden removal (OBR), maintaining critical bench advance ahead of extraction."
+                f"Stripping activities yielded {obr} M.Cu.m of overburden removal (OBR), maintaining critical bench advance ahead of extraction.{copilot_note}"
             )
             
             detailed_analysis = (
@@ -200,6 +219,9 @@ Instructions:
                 "Stage-II forestry clearances under active processing with State Forest Departments.",
                 "Afforestation and fly-ash backfilling progress on track with annual environmental guidelines."
             ]
+
+            if copilot_context:
+                detailed_analysis += f"\n\nCopilot analyst context for this run:\n{copilot_context[-1800:]}"
 
         return {
             "summary": summary,

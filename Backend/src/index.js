@@ -24,11 +24,13 @@ const reportsRoutes = require('./routes/reports.routes');
 const syncRoutes = require('./routes/sync.routes');
 const uploadRoutes = require('./routes/upload.routes');
 const chatRoutes = require('./routes/chat.routes');
+const workspaceRoutes = require('./routes/workspace.routes');
 const parliamentaryRoutes = require('./routes/parliamentary.routes');
 const analyticsRoutes = require('./routes/analytics.routes');
 const subsidiaryRoutes = require('./routes/subsidiary.routes');
 const searchRoutes = require('./routes/search.routes');
 const { ensureFTSIndexes } = require('./services/searchService');
+const { resumePendingTasks } = require('./services/workspaceTaskService');
 
 const app = express();
 
@@ -114,6 +116,7 @@ app.use('/api/analytics', analyticsRoutes);
 app.use('/api/subsidiaries', subsidiaryRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api', chatRoutes);
+app.use('/api', workspaceRoutes);
 
 // ==========================================
 // 404 Handler
@@ -152,6 +155,9 @@ async function start() {
       console.log(`🚀 CoalGov Backend running on 0.0.0.0:${PORT} [${env.NODE_ENV}]`);
       console.log(`📡 Health check: http://localhost:${PORT}/health`);
       console.log(`📁 Static files hosted at: http://localhost:${PORT}/uploads`);
+      resumePendingTasks().then((count) => {
+        if (count > 0) console.log(`♻️ Resumed ${count} pending workspace task(s)`);
+      }).catch((err) => console.warn('Workspace task recovery notice:', err.message));
     });
   } catch (err) {
     console.error('❌ Failed to start server:', err);

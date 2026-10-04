@@ -1,6 +1,7 @@
 const { memoryStore } = require('../services/memoryStore');
 const prisma = require('../config/db');
 const { verifyAccessToken } = require('../utils/jwt');
+const { createWorkspaceTask, triggerDocumentAutomations } = require('../services/workspaceTaskService');
 
 const ML_SERVICE_URL = process.env.ML_SERVICE_URL || 'http://127.0.0.1:8001';
 
@@ -52,6 +53,52 @@ function resolveUser(req) {
   return { userId: 'anonymous', role: 'ANONYMOUS' };
 }
 
+function inferWorkspaceAction(message, hasAttachedDocuments, activeDocumentId) {
+  if (!hasAttachedDocuments) return null;
+  const text = String(message || '').toLowerCase();
+  if (/\b(generate|create|make|prepare|build)\b[\s\S]{0,80}\b(report|document|brief|summary)\b/.test(text)) {
+    return 'GENERATE_REPORT';
+  }
+  if (activeDocumentId && /\b(add|change|modify|edit|rewrite|replace|delete|shorten|expand|convert|update)\b/.test(text)) {
+    return 'EDIT_DOCUMENT';
+  }
+  if (/\bcompare\b/.test(text)) {
+    return 'COMPARE_DOCUMENTS';
+  }
+  if (/\b(analy[sz]e|read|review|summari[sz]e)\b/.test(text)) {
+    return 'ANALYZE_DOCUMENT';
+  }
+  return null;
+}
+
+async function getAttachedWorkspaceDocuments(sessionId, userId) {
+  if (!sessionId || !userId) return { session: null, documents: [] };
+  try {
+    const session = await prisma.chatSession.findFirst({ where: { id: sessionId, userId } });
+    if (!session) return { session: null, documents: [] };
+    const links = await prisma.chatDocument.findMany({
+      where: { sessionId },
+      include: { document: true },
+      orderBy: { attachedAt: 'asc' },
+    });
+    return { session, documents: links.map((link) => link.document) };
+  } catch (error) {
+    console.warn('Workspace attachment lookup skipped:', error.message);
+    return { session: null, documents: [] };
+  }
+}
+
+async function saveAssistantMessage(sessionId, userId, content, sources) {
+  try {
+    await prisma.message.create({
+      data: { sessionId, role: 'assistant', content, sources: sources || undefined },
+    });
+    await prisma.chatSession.update({ where: { id: sessionId }, data: { updatedAt: new Date() } });
+  } catch (error) {
+    console.warn('Could not save workspace assistant message:', error.message);
+  }
+}
+
 /**
  * Proxies streaming chat to ML service (Ollama gemma3:1b),
  * optionally retrieving context from RAG, and managing
@@ -67,6 +114,12 @@ exports.handleChatStream = async (req, res) => {
   const user = resolveUser(req);
   const userId = user.userId;
   const sessionId = rawSessionId || `session-${Date.now()}`;
+
+  // Load the document links before retrieval. Indexed documents are only useful
+  // to this conversation when they are explicitly attached to its workspace.
+  const workspace = isPersistent
+    ? await getAttachedWorkspaceDocuments(sessionId, userId)
+    : { session: null, documents: [] };
 
   // 1. Prepare conversation history & persistence (isolated to userId)
   let contextHistory = [];
@@ -100,11 +153,18 @@ exports.handleChatStream = async (req, res) => {
 
   // 2. Query RAG context from ML service
   let ragContext = '';
-  try {
+  if (workspace.documents.length > 0) {
+    try {
     const ragRes = await fetch(`${ML_SERVICE_URL}/rag/query`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: message, top_k: 3 }),
+      body: JSON.stringify({
+        query: message,
+        top_k: 3,
+        document_ids: workspace.documents
+          .map((document) => document.extractedData?.ragDocumentId || document.id)
+          .filter(Boolean),
+      }),
     });
     if (ragRes.ok) {
       const ragData = await ragRes.json();
@@ -119,8 +179,9 @@ exports.handleChatStream = async (req, res) => {
         }
       }
     }
-  } catch (ragErr) {
-    console.warn('RAG query skipped or failed:', ragErr.message);
+    } catch (ragErr) {
+      console.warn('RAG query skipped or failed:', ragErr.message);
+    }
   }
 
   // Record user message
@@ -158,6 +219,34 @@ exports.handleChatStream = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
 
   let fullAssistantResponse = '';
+
+  // Tool requests become durable server-side jobs. The browser gets an immediate
+  // acknowledgement and can safely navigate away while the worker continues.
+  const action = isPersistent
+    ? inferWorkspaceAction(message, workspace.documents.length > 0, workspace.session?.activeDocumentId)
+    : null;
+  if (action) {
+    try {
+      const task = await createWorkspaceTask({
+        userId,
+        sessionId,
+        documentId: workspace.session?.activeDocumentId || null,
+        type: action,
+        payload: { instruction: message, title: workspace.session?.title },
+      });
+      const acknowledgment = action === 'EDIT_DOCUMENT'
+        ? 'I have started a background document revision. I will save a new version and keep the source document unchanged.'
+        : action === 'GENERATE_REPORT'
+          ? 'I have started a background report-generation task using the documents attached to this conversation.'
+          : 'I have started a background document-analysis task for the documents attached to this conversation.';
+      await saveAssistantMessage(sessionId, userId, acknowledgment, { taskId: task.id });
+      res.write(`data: ${JSON.stringify({ token: acknowledgment, done: true, task })}\n\n`);
+      return res.end();
+    } catch (taskError) {
+      // Continue to normal chat if the workspace task could not be scheduled.
+      console.warn('Workspace task could not be scheduled:', taskError.message);
+    }
+  }
 
   try {
     const mlResponse = await fetch(`${ML_SERVICE_URL}/chat/stream`, {
@@ -389,7 +478,54 @@ exports.uploadRagDocument = async (req, res) => {
     }
 
     const data = await mlRes.json();
-    return res.status(200).json(data);
+    const user = resolveUser(req);
+    const userId = user.userId;
+    const sessionId = req.body?.sessionId;
+
+    // Mirror the ML RAG identifier into the platform document registry. This is
+    // what makes an indexed file attachable to a chat and retrievable by scope.
+    let workspaceDocument = null;
+    try {
+      workspaceDocument = await prisma.document.upsert({
+        where: { id: data.document_id },
+        update: {
+          name: data.filename,
+          status: 'Indexed',
+          extractedData: { ragDocumentId: data.document_id, chunksCount: data.chunks_count },
+        },
+        create: {
+          id: data.document_id,
+          userId,
+          name: data.filename,
+          fileType: (data.filename || '').split('.').pop()?.toUpperCase() || 'DOCUMENT',
+          mineName: 'Workspace document',
+          status: 'Indexed',
+          isImmutable: true,
+          extractedData: { ragDocumentId: data.document_id, chunksCount: data.chunks_count },
+        },
+      });
+
+      if (sessionId) {
+        const session = await prisma.chatSession.findFirst({ where: { id: sessionId, userId } });
+        if (session) {
+          await prisma.chatDocument.upsert({
+            where: { sessionId_documentId: { sessionId, documentId: workspaceDocument.id } },
+            update: { role: 'SOURCE' },
+            create: { sessionId, documentId: workspaceDocument.id, role: 'SOURCE' },
+          });
+          await prisma.chatSession.update({ where: { id: sessionId }, data: { activeDocumentId: workspaceDocument.id } });
+        }
+      }
+    } catch (workspaceError) {
+      console.warn('RAG document was indexed but could not be linked to workspace:', workspaceError.message);
+    }
+    try {
+      const automationTasks = await triggerDocumentAutomations({ userId, documentId: workspaceDocument?.id, sessionId });
+      if (automationTasks.length > 0) data.automationTasks = automationTasks;
+    } catch (automationError) {
+      console.warn('Document automations could not be scheduled:', automationError.message);
+    }
+    return res.status(200).json({ ...data, workspaceDocument, attachedToSession: Boolean(sessionId && workspaceDocument) });
   } catch (error) {
     console.error('uploadRagDocument error:', error.message);
     return res.status(500).json({ success: false, message: error.message });

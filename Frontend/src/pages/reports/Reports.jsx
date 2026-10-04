@@ -24,9 +24,19 @@ import Button from '../../components/common/Button.jsx';
 import { reportsService } from '../../services/reportsService.js';
 import { subsidiaryService } from '../../services/subsidiaryService.js';
 import { documentService } from '../../services/documentService.js';
+import { chatService } from '../../services/chatService.js';
 
 const inputClass =
   'w-full rounded border border-border-strong bg-white px-3 py-2 text-sm text-ink-900 focus:border-brand-600 focus:ring-1 focus:ring-brand-600';
+
+function reportTaskStorageKey() {
+  try {
+    const user = JSON.parse(localStorage.getItem('minegov_auth_user') || '{}');
+    return `coalgov_report_task_${user?.id || 'anonymous'}`;
+  } catch (_) {
+    return 'coalgov_report_task_anonymous';
+  }
+}
 
 export default function Reports() {
   const [templates, setTemplates] = useState([]);
@@ -41,6 +51,10 @@ export default function Reports() {
   const [selectedDbDocIds, setSelectedDbDocIds] = useState([]);
   const [showDbDocSelector, setShowDbDocSelector] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [reportTaskId, setReportTaskId] = useState(null);
+  const [reportTask, setReportTask] = useState(null);
+  const [copilotSessions, setCopilotSessions] = useState([]);
+  const [copilotSessionId, setCopilotSessionId] = useState('');
   const [report, setReport] = useState(null);
   const [uploadError, setUploadError] = useState(null);
   const [exportingPdf, setExportingPdf] = useState(false);
@@ -60,26 +74,103 @@ export default function Reports() {
     documentService.getDocuments().then((docs) => {
       if (Array.isArray(docs)) setDbDocuments(docs);
     }).catch((err) => console.warn('Notice loading DB documents:', err));
+    chatService.getConversations().then((sessions) => {
+      const persistent = (Array.isArray(sessions) ? sessions : []).filter((session) => session.isPersistent === true);
+      setCopilotSessions(persistent);
+      if (persistent.length > 0) setCopilotSessionId((current) => current || persistent[0].id);
+    }).catch((err) => console.warn('Notice loading Copilot sessions:', err));
+    let pendingTaskId = null;
+    try { pendingTaskId = localStorage.getItem(reportTaskStorageKey()); } catch (_) {}
+    if (pendingTaskId) {
+      setReportTaskId(pendingTaskId);
+      setGenerating(true);
+    } else {
+      // If the page was unmounted after completion, restore the latest readable
+      // report from the durable task result instead of losing it with React state.
+      chatService.getWorkspaceTasks().then((tasks) => {
+        const latest = (Array.isArray(tasks) ? tasks : []).find(
+          (task) => task.type === 'REPORT_STUDIO_GENERATE' && task.status === 'COMPLETED' && task.result
+        );
+        if (!latest) return;
+        const taskResult = latest.result || {};
+        const reportData = taskResult.reportData || taskResult;
+        if (reportData) {
+          setReport({
+            ...reportData,
+            generatedDocumentUrl: taskResult.fileUrl || reportData.generatedDocumentUrl || null,
+            generatedDocumentId: taskResult.reportDocumentId || reportData.generatedDocumentId || null,
+            generatedVersionId: taskResult.versionId || reportData.generatedVersionId || null,
+          });
+        }
+      }).catch(() => {});
+    }
   }, []);
 
+  useEffect(() => {
+    if (!reportTaskId) return undefined;
+    let active = true;
+    let timer;
+    const poll = async () => {
+      try {
+        const task = await reportsService.getTask(reportTaskId);
+        if (!active) return;
+        setReportTask(task);
+        if (task.status === 'COMPLETED') {
+          const taskResult = task.result || {};
+          const reportData = taskResult.reportData || taskResult;
+          setReport(reportData ? {
+            ...reportData,
+            generatedDocumentUrl: taskResult.fileUrl || reportData.generatedDocumentUrl || null,
+            generatedDocumentId: taskResult.reportDocumentId || reportData.generatedDocumentId || null,
+            generatedVersionId: taskResult.versionId || reportData.generatedVersionId || null,
+          } : null);
+          setGenerating(false);
+          setReportTaskId(null);
+          try { localStorage.removeItem(reportTaskStorageKey()); } catch (_) {}
+          documentService.getDocuments().then((docs) => {
+            if (Array.isArray(docs)) setDbDocuments(docs);
+          }).catch(() => {});
+          return;
+        }
+        if (['FAILED', 'CANCELLED'].includes(task.status)) {
+          setGenerating(false);
+          setUploadError(task.error || `Report task ${task.status.toLowerCase()}.`);
+          setReportTaskId(null);
+          try { localStorage.removeItem(reportTaskStorageKey()); } catch (_) {}
+          return;
+        }
+        setGenerating(true);
+      } catch (error) {
+        if (active) setUploadError(error.message || 'Unable to read report task status.');
+      }
+      if (active) timer = window.setTimeout(poll, 2500);
+    };
+    poll();
+    return () => {
+      active = false;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [reportTaskId]);
+
   async function handleGenerate() {
-    setGenerating(true);
     setReport(null);
     setUploadError(null);
+    if (generationMode === 'UPLOAD' && !uploadedFile) {
+      setUploadError('Please select a document or spreadsheet to analyze.');
+      return;
+    }
+    setGenerating(true);
+    let queued = false;
     try {
       let result;
       if (generationMode === 'UPLOAD') {
-        if (!uploadedFile) {
-          setUploadError('Please select a document or spreadsheet to analyze.');
-          setGenerating(false);
-          return;
-        }
         result = await reportsService.analyzeAndGenerateFromUpload(uploadedFile, {
           templateType: selectedTemplate,
           subsidiary: selectedSubsidiary,
           period: selectedPeriod,
           saveToDatabase,
           selectedDocumentIds: selectedDbDocIds,
+          copilotSessionId: copilotSessionId || undefined,
         });
       } else {
         result = await reportsService.generateAutomatedReport({
@@ -87,20 +178,23 @@ export default function Reports() {
           subsidiary: selectedSubsidiary,
           period: selectedPeriod,
           selectedDocumentIds: selectedDbDocIds,
+          copilotSessionId: copilotSessionId || undefined,
         });
       }
-      setReport(result);
-      // Refresh documents list if a new document was saved
-      if (saveToDatabase && generationMode === 'UPLOAD') {
-        documentService.getDocuments().then((docs) => {
-          if (Array.isArray(docs)) setDbDocuments(docs);
-        }).catch(() => {});
+      if (result?.task?.id) {
+        queued = true;
+        setReportTaskId(result.task.id);
+        setReportTask(result.task);
+        try { localStorage.setItem(reportTaskStorageKey(), result.task.id); } catch (_) {}
+      } else {
+        // Backward-compatible response from an older backend.
+        setReport(result);
       }
     } catch (err) {
       console.error('Failed to generate report:', err);
       setUploadError(err.message || 'Report generation failed. Please try again.');
     } finally {
-      setGenerating(false);
+      if (!queued) setGenerating(false);
     }
   }
 
@@ -429,10 +523,35 @@ export default function Reports() {
           </div>
         </div>
 
+        <div className="mt-4 rounded-lg border border-violet-200 bg-violet-50/60 p-3.5">
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="text-xs font-semibold text-violet-900">Add Copilot analyst context</p>
+              <p className="text-[11px] text-violet-700">
+                The selected persistent Copilot conversation is sent to the report worker as additional context, so its summary and risks are expanded in the final report.
+              </p>
+            </div>
+            <select
+              value={copilotSessionId}
+              onChange={(e) => setCopilotSessionId(e.target.value)}
+              className="min-w-[230px] rounded border border-violet-200 bg-white px-2.5 py-2 text-xs text-ink-800"
+            >
+              {copilotSessions.length === 0 && <option value="">No persistent Copilot conversation found</option>}
+              {copilotSessions.map((session) => (
+                <option key={session.id} value={session.id}>
+                  {session.title || 'Copilot conversation'}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
         <div className="mt-6 flex flex-wrap items-center justify-between border-t border-border pt-4">
           <div className="flex items-center gap-2 text-xs text-ink-500">
             <span className="h-2 w-2 rounded-full bg-emerald-500"></span>
-            {generationMode === 'UPLOAD'
+            {generationMode === 'UPLOAD' && !uploadedFile
+              ? 'Select a source file above, or switch to Synthesize from Database'
+              : generationMode === 'UPLOAD'
               ? 'Multimodal Document Vision & PyMuPDF Extraction Engine Active'
               : 'Connected to local Gemma AI and CMPDI Borehole Database'}
           </div>
@@ -457,10 +576,10 @@ export default function Reports() {
           <div className="flex flex-col items-center justify-center gap-3">
             <Loader2 size={36} className="animate-spin text-brand-600" />
             <h4 className="text-base font-semibold text-ink-900">
-              {generationMode === 'UPLOAD' ? 'Extracting Figures & Parsing Ingested Documents' : 'Synthesizing Geological & Mining Figures'}
+              {reportTask?.currentStep || (generationMode === 'UPLOAD' ? 'Extracting Figures & Parsing Ingested Documents' : 'Synthesizing Geological & Mining Figures')}
             </h4>
             <p className="text-xs text-ink-500 max-w-md">
-              Extracting tables from scanned PDFs, reconciling subsidiary spreadsheets, and generating in-depth technical dossier…
+              {reportTask ? `Background task ${reportTask.status?.toLowerCase() || 'queued'} · ${reportTask.progress || 0}% complete. You can switch tabs; this task will keep running.` : 'Extracting tables from scanned PDFs, reconciling subsidiary spreadsheets, and generating in-depth technical dossier…'}
             </p>
           </div>
         </Card>
@@ -486,11 +605,26 @@ export default function Reports() {
                     <Database size={10} /> Combined with {report.uploadedSource.combinedDbDocs.length} DB records
                   </span>
                 )}
+                {report.uploadedSource?.copilotContextIncluded && (
+                  <span className="inline-flex items-center gap-1 rounded bg-violet-100 px-2 py-0.5 text-[10px] font-bold text-violet-800">
+                    <Check size={10} /> Copilot context included
+                  </span>
+                )}
               </div>
               <h2 className="text-xl font-bold text-ink-900 mt-1">{report.reportTitle}</h2>
               <p className="text-xs text-ink-500 mt-0.5">
                 Compiled at {report.generatedAt} · Target: {report.subsidiary} ({report.period})
               </p>
+              {report.generatedDocumentUrl && (
+                <a
+                  href={report.generatedDocumentUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-2 inline-flex items-center gap-1.5 rounded border border-brand-200 bg-brand-50 px-2.5 py-1.5 text-xs font-semibold text-brand-700 hover:bg-brand-100"
+                >
+                  <FileText size={13} /> Open generated DOCX document
+                </a>
+              )}
             </div>
 
             <div className="flex items-center gap-2 flex-wrap">

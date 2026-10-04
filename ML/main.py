@@ -167,6 +167,7 @@ class ChatStreamRequest(BaseModel):
 class RagQueryRequest(BaseModel):
     query: str
     top_k: Optional[int] = 4
+    document_ids: Optional[List[str]] = None
 
 # Helper: embed text using Ollama
 async def embed_text(text: str) -> List[float]:
@@ -410,6 +411,7 @@ async def rag_query(req: RagQueryRequest):
 
     query_embedding = await embed_text(req.query)
     top_k = req.top_k or 4
+    document_ids = [doc_id for doc_id in (req.document_ids or []) if doc_id]
 
     conn = get_db_connection()
     results = []
@@ -425,13 +427,23 @@ async def rag_query(req: RagQueryRequest):
 
         if has_native_vector:
             try:
-                cur.execute("""
-                    SELECT id, document_id, filename, content, 
-                           (1 - (embedding <=> %s::vector)) AS score
-                    FROM document_chunks
-                    ORDER BY embedding <=> %s::vector
-                    LIMIT %s;
-                """, (str(query_embedding), str(query_embedding), top_k))
+                if document_ids:
+                    cur.execute("""
+                        SELECT id, document_id, filename, content,
+                               (1 - (embedding <=> %s::vector)) AS score
+                        FROM document_chunks
+                        WHERE document_id = ANY(%s)
+                        ORDER BY embedding <=> %s::vector
+                        LIMIT %s;
+                    """, (str(query_embedding), document_ids, str(query_embedding), top_k))
+                else:
+                    cur.execute("""
+                        SELECT id, document_id, filename, content,
+                               (1 - (embedding <=> %s::vector)) AS score
+                        FROM document_chunks
+                        ORDER BY embedding <=> %s::vector
+                        LIMIT %s;
+                    """, (str(query_embedding), str(query_embedding), top_k))
                 rows = cur.fetchall()
                 for r in rows:
                     results.append({
@@ -446,7 +458,13 @@ async def rag_query(req: RagQueryRequest):
                 has_native_vector = False
 
         if not has_native_vector:
-            cur.execute("SELECT id, document_id, filename, content, embedding_json FROM document_chunks;")
+            if document_ids:
+                cur.execute(
+                    "SELECT id, document_id, filename, content, embedding_json FROM document_chunks WHERE document_id = ANY(%s);",
+                    (document_ids,),
+                )
+            else:
+                cur.execute("SELECT id, document_id, filename, content, embedding_json FROM document_chunks;")
             rows = cur.fetchall()
             if rows:
                 q_vec = np.array(query_embedding, dtype=np.float32)
@@ -477,7 +495,14 @@ async def rag_query(req: RagQueryRequest):
         # Query local SQLite fallback storage
         sconn = get_sqlite_conn()
         scur = sconn.cursor()
-        scur.execute("SELECT id, document_id, filename, content, embedding_json FROM document_chunks")
+        if document_ids:
+            placeholders = ",".join("?" for _ in document_ids)
+            scur.execute(
+                f"SELECT id, document_id, filename, content, embedding_json FROM document_chunks WHERE document_id IN ({placeholders})",
+                document_ids,
+            )
+        else:
+            scur.execute("SELECT id, document_id, filename, content, embedding_json FROM document_chunks")
         rows = scur.fetchall()
         if rows:
             q_vec = np.array(query_embedding, dtype=np.float32)

@@ -1,8 +1,114 @@
 const path = require('path');
 const axios = require('axios');
 const prisma = require('../config/db');
+const { verifyAccessToken } = require('../utils/jwt');
+const { createWorkspaceTask } = require('../services/workspaceTaskService');
 
 const ML_SERVICE_URL = process.env.ML_SERVICE_URL || 'http://localhost:8001';
+
+function resolveReportUserId(req) {
+  if (req.user?.userId) return String(req.user.userId);
+  const header = req.headers.authorization;
+  if (header?.startsWith('Bearer ')) {
+    const token = header.slice(7);
+    if (token.startsWith('mock-token-')) return token.replace('mock-token-', '').trim();
+    try {
+      return String(verifyAccessToken(token)?.userId || '');
+    } catch (_) {}
+  }
+  return String(req.headers['x-user-id'] || req.body?.userId || req.query?.userId || '');
+}
+
+function parseSelectedDocumentIds(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.filter(Boolean).map(String);
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter(Boolean).map(String) : [String(parsed)];
+  } catch (_) {
+    return [String(value)];
+  }
+}
+
+async function validCopilotSessionId(userId, value) {
+  if (!value) return null;
+  const session = await prisma.chatSession.findFirst({
+    where: { id: String(value), userId, isPersistent: true },
+    select: { id: true },
+  });
+  return session?.id || null;
+}
+
+const createReportTask = async (req, res) => {
+  try {
+    const userId = resolveReportUserId(req);
+    const {
+      templateType = 'MONTHLY_PRODUCTION_OFFTAKE',
+      subsidiary = 'SECL',
+      period = 'FY 2023-24 (Q4)',
+      selectedDocumentIds = [],
+      copilotSessionId = null,
+    } = req.body || {};
+    const sessionId = await validCopilotSessionId(userId, copilotSessionId);
+    const task = await createWorkspaceTask({
+      userId,
+      sessionId,
+      type: 'REPORT_STUDIO_GENERATE',
+      payload: {
+        mode: 'DATABASE',
+        templateType,
+        subsidiary,
+        period,
+        selectedDocumentIds: parseSelectedDocumentIds(selectedDocumentIds),
+        copilotSessionId: sessionId,
+        saveToDatabase: false,
+        title: `${templateType}_${subsidiary}_${period}`,
+      },
+    });
+    return res.status(202).json({ success: true, task });
+  } catch (error) {
+    console.error('createReportTask error:', error);
+    return res.status(500).json({ success: false, message: error.message || 'Unable to start report task.' });
+  }
+};
+
+const createReportUploadTask = async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ success: false, message: 'No source file uploaded for analysis' });
+    const userId = resolveReportUserId(req);
+    const {
+      templateType = 'MONTHLY_PRODUCTION_OFFTAKE',
+      subsidiary = 'SECL',
+      period = 'FY 2023-24 (Q4)',
+      saveToDatabase = 'true',
+      selectedDocumentIds = [],
+      copilotSessionId = null,
+    } = req.body || {};
+    const sessionId = await validCopilotSessionId(userId, copilotSessionId);
+    const task = await createWorkspaceTask({
+      userId,
+      sessionId,
+      type: 'REPORT_STUDIO_GENERATE',
+      payload: {
+        mode: 'UPLOAD',
+        filePath: req.file.path,
+        filename: req.file.originalname,
+        mimetype: req.file.mimetype,
+        templateType,
+        subsidiary,
+        period,
+        selectedDocumentIds: parseSelectedDocumentIds(selectedDocumentIds),
+        copilotSessionId: sessionId,
+        saveToDatabase: saveToDatabase === true || saveToDatabase === 'true',
+        title: `${templateType}_${subsidiary}_${path.basename(req.file.originalname, path.extname(req.file.originalname))}`,
+      },
+    });
+    return res.status(202).json({ success: true, task });
+  } catch (error) {
+    console.error('createReportUploadTask error:', error);
+    return res.status(500).json({ success: false, message: error.message || 'Unable to start uploaded report task.' });
+  }
+};
 
 // Available templates for CMPDI / CIL subsidiaries & Ministry of Coal
 const TEMPLATES = [
@@ -445,4 +551,6 @@ module.exports = {
   getTemplates,
   generateReport,
   analyzeAndGenerateFromUpload,
+  createReportTask,
+  createReportUploadTask,
 };

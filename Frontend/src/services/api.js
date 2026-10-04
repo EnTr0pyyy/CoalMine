@@ -41,6 +41,16 @@ export function mockDelay(data, ms = 350) {
   return new Promise((resolve) => setTimeout(() => resolve(data), ms));
 }
 
+function getClientUserId() {
+  try {
+    const rawUser = localStorage.getItem('minegov_auth_user');
+    const user = rawUser ? JSON.parse(rawUser) : null;
+    return user?.id ? String(user.id) : '';
+  } catch (_) {
+    return '';
+  }
+}
+
 class ApiError extends Error {
   constructor(message, status, payload) {
     super(message);
@@ -52,6 +62,7 @@ class ApiError extends Error {
 
 async function request(path, { method = 'GET', body, headers, signal } = {}) {
   const token = localStorage.getItem('minegov_auth_token');
+  const userId = getClientUserId();
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
   const targetUrl = API_BASE_URL.endsWith('/')
     ? `${API_BASE_URL.slice(0, -1)}${cleanPath}`
@@ -63,6 +74,7 @@ async function request(path, { method = 'GET', body, headers, signal } = {}) {
     headers: {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(userId ? { 'X-User-Id': userId } : {}),
       ...headers,
     },
     body: body ? JSON.stringify(body) : undefined,
@@ -86,6 +98,7 @@ async function request(path, { method = 'GET', body, headers, signal } = {}) {
 
 async function requestForm(path, formData, { method = 'POST', headers, signal } = {}) {
   const token = localStorage.getItem('minegov_auth_token');
+  const userId = getClientUserId();
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
   const targetUrl = API_BASE_URL.endsWith('/')
     ? `${API_BASE_URL.slice(0, -1)}${cleanPath}`
@@ -96,6 +109,7 @@ async function requestForm(path, formData, { method = 'POST', headers, signal } 
     signal,
     headers: {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(userId ? { 'X-User-Id': userId } : {}),
       ...headers,
     },
     body: formData,
